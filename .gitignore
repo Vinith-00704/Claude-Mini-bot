@@ -1,0 +1,19 @@
+# Dependencies and build output
+node_modules/
+
+# Logs and editor/OS leftovers
+*.log
+*~
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Written by Claude Code when it loads the plugin (it also ignores this folder itself)
+.claude-plugin/types/
+
+# Local test data and downloaded speech models, never part of the package
+.minibot-home/
+*.wav
+ggml-*.bin
+whisper-cli.exe

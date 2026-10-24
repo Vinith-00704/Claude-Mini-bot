@@ -1,0 +1,11 @@
+{
+  "name": "claude-mini-bot",
+  "owner": { "name": "Vinith-00704" },
+  "plugins": [
+    {
+      "name": "mini-bot",
+      "source": "./",
+      "description": "A floating Windows companion for Claude Code: click it to type or speak a prompt, snip the screen, and manage it with /mini-bot."
+    }
+  ]
+}

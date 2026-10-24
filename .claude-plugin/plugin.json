@@ -1,0 +1,8 @@
+{
+  "name": "mini-bot",
+  "version": "0.1.0",
+  "license": "MIT",
+  "author": { "name": "Vinith-00704" },
+  "repository": "https://github.com/Vinith-00704/Claude-Mini-bot",
+  "description": "/mini-bot: hide, settings, permissions, bot profiles and start/stop for the floating Mini Bot companion"
+}
