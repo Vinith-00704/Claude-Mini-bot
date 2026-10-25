@@ -16,6 +16,7 @@ import { currentValue, findField, FIELDS, GROUPS } from './fields'
 import { settingsMenu } from './settings-menu'
 import { speechCommand } from './speech'
 import { refreshStatus } from './status'
+import { updateCommand } from './update'
 import { setVisible, toggleVisible } from './visibility'
 import { MIN_RUNTIME_VERSION, type Engine } from './types'
 
@@ -34,6 +35,7 @@ const HELP = `Mini Bot: your floating character. Claude Code stays the intellige
   /mini-bot permissions grant|revoke <screen|microphone|computer|all>
   /mini-bot screenshot              snip part of the screen and ask Claude about it
   /mini-bot speech [install [small]]  check, or set up, accurate offline speech recognition
+  /mini-bot update                  is a newer version out on GitHub, and how to install it
   /mini-bot switch [name]           change to another bot (a list if no name)
   /mini-bot create [name]           make a new bot
   /mini-bot bot                     choose, create, rename, customize or delete bots
@@ -179,6 +181,9 @@ export async function runCommand($: Engine, input: string): Promise<string> {
       case 'speech':
       case 'voice':
         return speechCommand($, args)
+      case 'update':
+      case 'version':
+        return updateCommand($)
       case 'start':
         return (await startRuntime($)).message
       case 'stop':

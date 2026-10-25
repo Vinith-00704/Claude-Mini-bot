@@ -51,11 +51,14 @@ The bot appears on your screen. After that you do not have to start it again: by
 
 **Update**
 
+`/mini-bot update` tells you whether a newer version is out (one plain request to this repository's `plugin.json` on GitHub, nothing sent from your computer) and prints the commands below. A plugin cannot replace itself while it is running, so you run them yourself:
+
 ```
+claude plugin marketplace update claude-mini-bot
 claude plugin update mini-bot
 ```
 
-Then run `/reload-plugins` (or start a new session). If the bot was running, `/mini-bot stop` then `/mini-bot start` picks up the new version.
+The first line fetches the latest listing from GitHub, the second installs the new version. Then start a new Claude Code session (or run `/reload-plugins`). If the bot was running, `/mini-bot stop` then `/mini-bot start` makes it use the new version.
 
 **Uninstall**
 
@@ -156,6 +159,7 @@ Per bot: name, avatar (Clawd, blob, robot, cat, ghost, bunny), skin (Claude's or
 | `/mini-bot bot list \| use \| new \| rename \| customize \| delete` | the full set of bot commands |
 | `/mini-bot screenshot` | snip part of the screen |
 | `/mini-bot speech [install [small]]` | which speech recognizer is in use; set up offline Whisper |
+| `/mini-bot update` | which version is installed, whether GitHub has a newer one, and the commands to install it |
 | `/mini-bot help` | the list |
 
 ## Security model

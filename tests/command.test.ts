@@ -6,7 +6,15 @@ import { applyOp, normalizeConfig, sameChoices } from '../shared/config.mjs'
 // that follows the runtime's rules for configuration (the same shared file) and
 // keeps a prompt queue. Nothing sits beneath the plugin in a test, so each hook
 // here answers for the engine: a call on `$` is answered `{ value }`.
-type Options = { running: boolean; legacy?: boolean; stored?: unknown; unsent?: boolean }
+type Options = {
+  running: boolean
+  legacy?: boolean
+  stored?: unknown
+  unsent?: boolean
+  /** The version on this computer, and the one on GitHub (null: GitHub cannot be reached). */
+  installed?: string
+  latest?: string | null
+}
 
 const world = async ($: any, on: any, options: Options) => {
   let running = options.running
@@ -15,6 +23,7 @@ const world = async ($: any, on: any, options: Options) => {
   const submitted: any[] = []
   const asked: any[] = []
   const commands: string[][] = []
+  const urls: string[] = []
   let runtimeConfig: any = normalizeConfig(undefined)
   const permissions: any = Object.fromEntries(
     ['screen', 'microphone', 'computer'].map(k => [k, { granted: false, grantedAt: null, active: false, activeSince: null }]),
@@ -72,11 +81,17 @@ const world = async ($: any, on: any, options: Options) => {
   const clock = mock.clock(on)
   on('command.register', () => ({ value: { command: 'mini-bot' } }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
-  on('fs.read', () => {
+  on('fs.read', (_: any, e: any) => {
+    if (String(e.path).endsWith('plugin.json')) return { value: JSON.stringify({ name: 'mini-bot', version: options.installed ?? '0.1.0' }) }
     if (!running) throw new Error('ENOENT')
     return { value: JSON.stringify({ pid: 1, port: 4711, token: 'secret' }) }
   })
   on('http.fetch', (_: any, e: any) => {
+    if (new URL(e.url).hostname === 'raw.githubusercontent.com') {
+      urls.push(e.url)
+      if (options.latest == null) return { value: { status: 404, ok: false, headers: {}, text: '' } }
+      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ name: 'mini-bot', version: options.latest }) } }
+    }
     const path = new URL(e.url).pathname
     const method = e.init?.method ?? 'GET'
     const body = e.init?.body ? JSON.parse(e.init.body) : undefined
@@ -105,6 +120,7 @@ const world = async ($: any, on: any, options: Options) => {
   return {
     run,
     commands,
+    urls,
     tick,
     requests,
     config,
@@ -391,4 +407,23 @@ test('/mini-bot speech says which recognizer is in use and downloads nothing wit
   expect(commands.length).toBe(1)
   expect(await run('speech install huge')).toMatch(/base \| small/)
   expect(await run('help')).toMatch(/\/mini-bot speech/)
+})
+
+test('/mini-bot update compares the installed version with GitHub and gives the update commands', async ($, on) => {
+  const newer = await world($, on, { running: false, installed: '0.1.0', latest: '0.1.10' })
+  const text = await newer.run('update')
+  expect(text).toMatch(/0\.1\.0 is installed; version 0\.1\.10 is available/)
+  expect(text).toMatch(/claude plugin marketplace update claude-mini-bot[\s\S]*claude plugin update mini-bot/)
+  expect(newer.urls).toEqual(['https://raw.githubusercontent.com/Vinith-00704/Claude-Mini-bot/main/.claude-plugin/plugin.json'])
+  expect(await newer.run('help')).toMatch(/\/mini-bot update/)
+})
+
+test('/mini-bot update says when it is up to date', async ($, on) => {
+  const { run } = await world($, on, { running: false, installed: '0.2.0', latest: '0.2.0' })
+  expect(await run('update')).toBe('Mini Bot 0.2.0 is installed and up to date.')
+})
+
+test('/mini-bot update still gives the commands when GitHub cannot be reached', async ($, on) => {
+  const { run } = await world($, on, { running: false, installed: '0.2.0', latest: null })
+  expect(await run('update')).toMatch(/Could not check GitHub[\s\S]*claude plugin update mini-bot/)
 })
