@@ -56,7 +56,8 @@ namespace MiniBot
         DateTime localInfoUntil = DateTime.MinValue;
         SnipWindow snip;
         bool isStartingScreenshot;
-        string attachmentPath;
+        readonly List<Chip> attached = new List<Chip>();   // what goes with the next prompt: a screenshot, dropped files and folders
+        DateTime hoverAt = DateTime.MinValue;             // when a drag with files was last over the bot or the panel
         int lastScreenshotRequest = -1;
         string localError;
         DateTime localErrorUntil = DateTime.MinValue;
@@ -114,7 +115,11 @@ namespace MiniBot
             panel.MicHoldStarted += delegate { if (dict == null) { holdToTalk = true; OnMic(); } };
             panel.MicHoldReleased += delegate { if (dict != null && dict.IsActive) dict.Stop(); };
             panel.ScreenshotRequested += delegate { panel.BeginInvoke(new Action(StartScreenshot)); };
-            panel.AttachmentRemoved += ClearAttachment;
+            panel.ChipRemoved += RemoveChip;
+            panel.FilesDropped += delegate (string[] paths) { TakeFiles(paths, null); };
+            panel.DropHover += OnDropHover;
+            bot.DropHover += OnDropHover;
+            bot.FilesDropped += delegate (string[] paths, PointF at) { TakeFiles(paths, at); };
             panel.SizeCommitted += delegate (int width, int replyHeight)
             {
                 Try(delegate { st = api.Apply(Op("resize", "width", width, "replyHeight", replyHeight)); });
@@ -308,6 +313,8 @@ namespace MiniBot
         void Tick()
         {
             double t = clock.Elapsed.TotalSeconds;
+            // A drag that has left (no word of it for a moment) closes the mouth again.
+            if (bot.Meal != null && bot.Meal.Stage == Meal.Open && (DateTime.UtcNow - hoverAt).TotalMilliseconds > 450) bot.Meal = null;
             if (bot.Visible) bot.Redraw(t, false);
             if (panel.Visible && bot.Visible) panel.PlaceNear(bot.Bounds, Screen.FromRectangle(bot.Bounds).WorkingArea);
             HarvestVoice();
@@ -357,14 +364,13 @@ namespace MiniBot
         void Send(string text, string source)
         {
             var body = new Dictionary<string, object> { { "text", text }, { "source", source } };
-            if (attachmentPath != null)
-                body["attachments"] = new object[] { new Dictionary<string, object> { { "type", "image" }, { "path", attachmentPath } } };
+            if (attached.Count > 0) body["attachments"] = attached.Select(AttachmentBody).ToArray();
             bool ok = Try(delegate { api.Post("/v1/prompts", body); });
             if (!ok) return;
             reviewVoice = false;
             localError = null;
-            lastPrompt = attachmentPath != null ? "\u25A3 screenshot" + (text.Length > 0 ? "  " + text : "") : text;
-            ClearAttachment();
+            lastPrompt = attached.Count > 0 ? "\u25A3 " + AttachedNames() + (text.Length > 0 ? "  " + text : "") : text;
+            ClearAttachments();
             panel.SetInput("");
             Refresh();
         }
@@ -556,8 +562,10 @@ namespace MiniBot
                     Directory.CreateDirectory(folder);
                     string path = Path.Combine(folder, "screenshot-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".png");
                     picture.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-                    attachmentPath = path;
-                    panel.SetAttachment("screenshot " + picture.Width + " \u00D7 " + picture.Height);
+                    // One screenshot at a time: a new one replaces the one waiting.
+                    attached.RemoveAll(c => c.Kind == Chip.Shot);
+                    attached.Insert(0, new Chip { Kind = Chip.Shot, Label = "screenshot " + picture.Width + " \u00D7 " + picture.Height, Path = path });
+                    panel.SetChips(attached);
                     if (!bot.Visible) SetVisible(true);
                     ShowPanel();
                 }
@@ -573,10 +581,106 @@ namespace MiniBot
             if (!panel.Visible && action != SnipWindow.Ask && (localInfo != null || localError != null)) ShowPanel();
         }
 
-        void ClearAttachment()
+        // ---- attachments: the screenshot, and files and folders dropped on the bot ----
+
+        const int MaxFiles = 10;
+
+        void ClearAttachments()
         {
-            attachmentPath = null;
-            panel.SetAttachment("");
+            attached.Clear();
+            panel.SetChips(attached);
+        }
+
+        void RemoveChip(int index)
+        {
+            if (index >= 0 && index < attached.Count) attached.RemoveAt(index);
+            panel.SetChips(attached);
+        }
+
+        static Dictionary<string, object> AttachmentBody(Chip chip)
+        {
+            if (chip.Kind == Chip.Shot) return new Dictionary<string, object> { { "type", "image" }, { "path", chip.Path } };
+            return new Dictionary<string, object> { { "type", "file" }, { "path", chip.Path }, { "direct", chip.Direct } };
+        }
+
+        string AttachedNames()
+        {
+            var names = attached.Take(3).Select(c => c.Kind == Chip.Shot ? "screenshot" : c.Label).ToList();
+            if (attached.Count > 3) names.Add("+" + (attached.Count - 3) + " more");
+            return string.Join(", ", names.ToArray());
+        }
+
+        /// <summary>A drag with files is over the bot or the panel: the mouth opens, and stays open while it stays.</summary>
+        void OnDropHover()
+        {
+            hoverAt = DateTime.UtcNow;
+            if (panel.Mode == PanelWindow.Onboarding) return;   // it is waiting for its name first
+            if (bot.Meal == null && !look.Reduced) bot.Meal = Meal.Hover();
+        }
+
+        /// <summary>
+        /// Files or folders were dropped (or pasted). They are only listed here: their paths ride along with the
+        /// next prompt, which the person still has to send. Nothing is opened, read or copied.
+        /// </summary>
+        void TakeFiles(string[] paths, PointF? at)
+        {
+            if (panel.Mode == PanelWindow.Onboarding)
+            {
+                // The first-run name question comes first; files can be given once it is answered or skipped.
+                if (!look.Reduced) bot.Meal = Meal.Decline();
+                return;
+            }
+            int have = attached.Count(c => c.Kind != Chip.Shot);
+            int added = 0, leftOut = 0;
+            string problem = null;
+            bool meh = false, big = false;
+            foreach (string path in paths)
+            {
+                if (string.IsNullOrEmpty(path)) continue;
+                if (path.StartsWith(@"\\"))
+                {
+                    problem = "Files on a network share aren't supported. Drop a file from this computer.";
+                    continue;
+                }
+                bool folder = Directory.Exists(path);
+                if (!folder && !File.Exists(path))
+                {
+                    problem = "I couldn't find that file.";
+                    continue;
+                }
+                if (attached.Any(c => c.Kind != Chip.Shot && string.Equals(c.Path, path, StringComparison.OrdinalIgnoreCase))) continue;
+                if (have + added >= MaxFiles) { leftOut++; continue; }
+
+                var chip = new Chip
+                {
+                    Kind = folder ? Chip.Folder : Chip.File,
+                    Path = path,
+                    Label = (folder ? Path.GetFileName(path.TrimEnd('\\', '/')) : Path.GetFileName(path)),
+                    Direct = folder || FileKinds.IsDirect(path),
+                    Note = FileKinds.NoteFor(path, folder)
+                };
+                if (chip.Label.Length == 0) chip.Label = path;
+                if (!chip.Direct) meh = true;
+                if (!folder && FileKinds.IsBig(path)) big = true;
+                attached.Add(chip);
+                added++;
+            }
+
+            if (added == 0)
+            {
+                if (problem == null && leftOut == 0) { ShowInfo("That is already attached."); return; }
+                if (!look.Reduced) bot.Meal = Meal.Decline();
+                ShowError(problem ?? "That is the limit: " + MaxFiles + " files at a time. Send these first.");
+                if (!panel.Visible) ShowPanel();
+                return;
+            }
+
+            if (!look.Reduced) bot.Meal = Meal.Take(added, meh, big, at);
+            panel.SetChips(attached);
+            if (leftOut > 0) ShowInfo("Took " + added + ". The limit is " + MaxFiles + " files at a time, so " + leftOut + " were left out.");
+            else if (problem != null) ShowInfo("Took " + added + ". " + problem);
+            reviewVoice = false;
+            if (!panel.Visible) ShowPanel(); else panel.FocusInput();
         }
 
         // ---- first run ----

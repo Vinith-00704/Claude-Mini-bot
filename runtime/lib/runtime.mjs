@@ -3,7 +3,7 @@
 // itself is never touched from here.
 
 import { createServer } from 'node:http'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { applyOp, normalizeConfig, sameChoices } from '../../shared/config.mjs'
@@ -53,7 +53,16 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     const full = resolve(path)
     return full.toLowerCase().startsWith((screenshotsDir + sep).toLowerCase()) && full.toLowerCase().endsWith('.png') && existsSync(full)
   }
-  const prompts = new Prompts({ now, checkImage: isScreenshot })
+  // A dropped file or folder: whether it is there, and which it is. Only its existence is looked at, never its contents.
+  const kindOfPath = path => {
+    try {
+      const info = statSync(path)
+      return info.isDirectory() ? 'folder' : info.isFile() ? 'file' : null
+    } catch {
+      return null
+    }
+  }
+  const prompts = new Prompts({ now, checkImage: isScreenshot, checkPath: kindOfPath })
   // Things asked for from Claude Code that the overlay carries out (taking a screenshot).
   const requests = { screenshot: 0 }
   const startedAt = now()

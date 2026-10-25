@@ -75,6 +75,15 @@ namespace MiniBot
             return pose;
         }
 
+        /// <summary>Where the mouth is while it is open, for the file flying toward it.</summary>
+        public static PointF MouthAt(float x0, float y0, float s)
+        {
+            int u = Math.Max(1, (int)Math.Floor(s / 24f));
+            int ox = (int)Math.Round(x0 + (s - 24 * u) / 2f);
+            int oy = (int)Math.Round(y0);
+            return new PointF(ox + 12 * u, oy + 8.5f * u);
+        }
+
         /// <summary>Draws Clawd across `s` pixels (a whole number of 24 cells) with its top left at x0, y0.</summary>
         public static void Draw(Graphics g, float x0, float y0, float s, Look look, string phase, bool listening, double t)
         {
@@ -82,6 +91,17 @@ namespace MiniBot
             int ox = (int)Math.Round(x0 + (s - 24 * u) / 2f);
             int oy = (int)Math.Round(y0);
             var pose = PoseFor(look, phase, listening, t);
+
+            // Something is being dropped on it, or was just: the meal decides the pose and adds a mouth.
+            bool eating = look.Meal != null && !look.Reduced;
+            var meal = new MealPose();
+            if (eating)
+            {
+                meal = look.Meal.Pose();
+                pose = new Pose { Eyes = meal.Eyes, Arms = meal.Arms, Feet = "both", Hop = meal.Hop };
+                ox += meal.Shake * u;
+            }
+            int dy = eating && meal.Squash ? 1 : 0;   // chewing presses the body down one cell
             int lift = pose.Hop ? u : 0;
             Color body = Ui.Skin(look.Skin);
 
@@ -92,6 +112,7 @@ namespace MiniBot
             using (var shade = new SolidBrush(Color.FromArgb(pose.Hop ? 35 : 60, 0, 0, 0)))
             using (var fill = new SolidBrush(body))
             using (var ink = new SolidBrush(EyeColor))
+            using (var tongue = new SolidBrush(Color.FromArgb(222, 108, 118)))
             {
                 Action<Brush, int, int, int, int> cells = (brush, col, row, cols, rows) =>
                     g.FillRectangle(brush, ox + col * u, oy + row * u - lift, cols * u, rows * u);
@@ -99,29 +120,42 @@ namespace MiniBot
                 g.FillRectangle(shade, ox + 4 * u, oy + 15 * u, 16 * u, u);
 
                 // Body, then the eyes as dark cells on it.
-                cells(fill, 3, 0, 18, 12);
+                cells(fill, 3, dy, 18, 12 - dy);
                 int shift = pose.Eyes == "left" ? -1 : pose.Eyes == "right" ? 1 : 0;
                 switch (pose.Eyes)
                 {
                     case "closed":
-                        cells(ink, 5, 4, 3, 1);
-                        cells(ink, 16, 4, 3, 1);
+                        cells(ink, 5, 4 + dy, 3, 1);
+                        cells(ink, 16, 4 + dy, 3, 1);
                         break;
                     case "wink":
-                        cells(ink, 6, 3, 1, 3);
-                        cells(ink, 16, 4, 3, 1);
+                        cells(ink, 6, 3 + dy, 1, 3);
+                        cells(ink, 16, 4 + dy, 3, 1);
                         break;
                     default:
-                        cells(ink, 6 + shift, 3, 1, 3);
-                        cells(ink, 17 + shift, 3, 1, 3);
+                        cells(ink, 6 + shift, 3 + dy, 1, 3);
+                        cells(ink, 17 + shift, 3 + dy, 1, 3);
                         break;
+                }
+
+                // The mouth, only while it is eating (or about to): wide open with a tongue, half open, or shut.
+                if (eating && meal.Mouth > 0)
+                {
+                    int my = 7 + dy;
+                    if (meal.Mouth == 3)
+                    {
+                        cells(ink, 9, my, 6, 3);
+                        if (meal.Tongue) cells(tongue, 11, my + 2, 2, 1);
+                    }
+                    else if (meal.Mouth == 2) cells(ink, 10, my, 4, 2);
+                    else cells(ink, 10, my + 1, 4, 1);
                 }
 
                 // Arms.
                 int leftArm = pose.Arms == "up" ? 2 : 6;
                 int rightArm = pose.Arms == "up" || pose.Arms == "one-up" ? 2 : 6;
-                cells(fill, 0, leftArm, 3, 3);
-                cells(fill, 21, rightArm, 3, 3);
+                cells(fill, 0, leftArm + dy, 3, 3);
+                cells(fill, 21, rightArm + dy, 3, 3);
 
                 // Legs: all four, or one pair while it walks.
                 if (pose.Feet != "right")

@@ -90,6 +90,7 @@ Your bots and settings stay in `%APPDATA%\ClaudeMiniBot`, and the optional speec
 | **Click** the bot, type, **Enter** | send a prompt to Claude Code |
 | **Hold Space** in the prompt | talk instead of typing |
 | The **snip** button | screenshot part of the screen and ask about it |
+| **Drop files** on the bot | have Claude look at them (see below) |
 | **Right-click** the bot | hide, customize, change bot, permissions, stop |
 | `/mini-bot help` | every command |
 
@@ -116,6 +117,7 @@ Taken from the app itself, not imitated:
 | The **microphone** button, or **holding Space** in the empty prompt | speak a prompt (see below) |
 | The **sliders** button in the panel | customize this bot |
 | The **snip** button in the panel, or right-click > Take screenshot | snip part of the screen and ask Claude about it (below) |
+| **Drop** files or folders on the bot or its panel, or **Ctrl+V** files copied in Explorer | attach them to the next prompt as chips (below) |
 | The tray icon | show or hide the bot, open the prompt, take a screenshot, customize, stop |
 
 The panel always sits beside the bot and never covers it or leaves the screen: if there is not room for the size you chose, the reply area is shortened (your chosen size is kept). Only the reply area changes height, so dragging an edge before there is a reply changes the width only. In Customize, **Long replies > Grow the panel** lets a long reply make the panel taller by itself (up to 60% of the screen's height, and never smaller than the size you chose), and **Chat panel > Reset to default size** puts it back. From Claude Code: `/mini-bot set panel-size 520x300` (width x reply height, in pixels), `set panel-size reset`, `set grow-replies on`.
@@ -139,7 +141,16 @@ A snipping tool in Claude Code's style. The screen is captured first, frozen and
 - **Ask Claude** attaches the screenshot to the panel's next prompt (it shows as a chip you can remove). Type a question, or send it as it is. Claude Code receives the question and the screenshot's file path, and opens the image with its Read tool, under its own permissions. A plugin's prompt cannot carry an image itself, which is why it goes as a file.
 - `/mini-bot screenshot` starts the same snip from Claude Code.
 
-The first screenshot asks for screen access (in Claude Code's permission colour); nothing is captured without it, and it can be turned off from right-click > Permissions. Screenshots for Claude are kept in `%APPDATA%\ClaudeMiniBot\screenshots` and removed after a week. Only screenshots saved there can be attached to a prompt: the runtime refuses any other path.
+The first screenshot asks for screen access (in Claude Code's permission colour); nothing is captured without it, and it can be turned off from right-click > Permissions. Screenshots for Claude are kept in `%APPDATA%\ClaudeMiniBot\screenshots` and removed after a week. Besides screenshots saved there, only the paths of files and folders you drop on the bot (full local paths that exist) can be attached to a prompt; the runtime refuses anything else.
+
+### Dropping files on the bot
+
+Drag files or folders from Explorer onto the bot (or onto its open panel) and it eats them: its mouth opens as soon as the drag is over it, the file flies in, it chews twice and swallows. A shrug means the kind of file is one Claude may not open directly. A shake of the head means nothing could be taken. Ctrl+V in the prompt does the same with files copied in Explorer. Nothing about the bot's look changes the rest of the time: the mouth only exists while it is eating, and with **reduced motion** on the animation is skipped (the files are still attached).
+
+- Each file or folder becomes a **chip** above the prompt, with a small x to take it off. Nothing is sent until you press Enter, so you can add a question first. Up to 10 at a time; a folder counts as one.
+- A plugin's prompt can only carry text, so the bot passes the **path**, not the contents. Claude Code opens it with its own tools, under its own permissions (it asks you first for files outside your project, as usual). The bot never reads, copies or moves a dropped file.
+- Claude can read text and code, images, PDFs and notebooks directly. Types it cannot open directly (archives, programs, Office files, audio and video, and so on) get a small **!** on the chip and are sent with a note telling Claude to use a command or a script if it needs what is inside. You can send them anyway.
+- Only paths on this computer are accepted: no network shares, no relative paths. The first-run name question comes first; drops are refused until it is answered or skipped.
 
 ### Customizing
 
@@ -164,6 +175,7 @@ Per bot: name, avatar (Clawd, blob, robot, cat, ghost, bunny), skin (Claude's or
 
 ## Security model
 
+- A dropped file is only a path in the prompt: the bot never reads its contents, and Claude Code opens it under its own permissions.
 - Prompts reach Claude Code only through `$.prompt.submit`, so they run under your normal permission rules and appear in the transcript. The bot never reads or changes Claude Code's permission rules, and it is not a second assistant.
 - Access to the microphone (and screen, and computer control) is the companion's own and separate from Claude Code's permissions. Granting needs your explicit answer (a dialog in Claude Code, or the Allow button in the bot's panel); the runtime also refuses a grant that does not say it was confirmed. Grants last only while the runtime runs, so a restarted companion starts with nothing granted. Stopping the companion ends every capture.
 - The access indicator is computed from live access state alone, so hiding the bot cannot hide it.

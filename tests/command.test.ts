@@ -385,6 +385,55 @@ test('a screenshot sent with no words asks Claude to take a look', async ($, on)
   expect(activity().at(-1)).toMatchObject({ phase: 'thinking', source: 'bot', id: 's2' })
 })
 
+test('dropped files and folders ride along as paths, each told how to be opened', async ($, on) => {
+  const { prompts, submitted, tick } = await world($, on, { running: true })
+  prompts.push({
+    id: 'f1',
+    text: 'what do these say?',
+    source: 'text',
+    at: 0,
+    attachments: [
+      { type: 'file', path: 'C:\docs\report.pdf', kind: 'file', direct: true },
+      { type: 'file', path: 'C:\docs\data.zip', kind: 'file', direct: false },
+      { type: 'file', path: 'C:\docs\src', kind: 'folder', direct: true },
+    ],
+  })
+  await tick()
+  expect(submitted[0].text).toBe(
+    [
+      'what do these say?',
+      '',
+      'File from Mini Bot (open it with the Read tool): C:\docs\report.pdf',
+      'File from Mini Bot (the Read tool may not open this type; use a command or script if you need what is inside): C:\docs\data.zip',
+      'Folder from Mini Bot (list what is inside it, then open what matters): C:\docs\src',
+    ].join('\n'),
+  )
+})
+
+test('files sent with no words ask Claude to take a look', async ($, on) => {
+  const { prompts, submitted, tick } = await world($, on, { running: true })
+  prompts.push({ id: 'f2', text: '', source: 'text', at: 0, attachments: [{ type: 'file', path: 'C:\a.pdf', kind: 'file', direct: true }] })
+  prompts.push({ id: 'f3', text: '', source: 'text', at: 0, attachments: [{ type: 'file', path: 'C:\src', kind: 'folder', direct: true }] })
+  prompts.push({
+    id: 'f4',
+    text: '',
+    source: 'text',
+    at: 0,
+    attachments: [
+      { type: 'image', path: 'C:\shots\a.png' },
+      { type: 'file', path: 'C:\a.pdf', kind: 'file', direct: true },
+    ],
+  })
+  await tick()
+  await tick()
+  await tick()
+  expect(submitted.map(s => s.text.split('\n')[0])).toEqual([
+    'Take a look at this file.',
+    'Take a look at this folder.',
+    'Take a look at the attachments.',
+  ])
+})
+
 test('/mini-bot screenshot asks the floating bot to start a snip', async ($, on) => {
   const { run, requests } = await world($, on, { running: true })
   expect(await run('screenshot')).toMatch(/Select an area on screen/)

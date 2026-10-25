@@ -72,8 +72,11 @@ namespace MiniBot
         public event Action Clicked;
         public event Action<Point> Dragged;
         public event Action<Point> MenuRequested;
+        public event Action DropHover;                        // a drag with files is over the bot (raised again and again while it stays)
+        public event Action<string[], PointF> FilesDropped;   // files or folders were dropped: their paths, and where on the bot
 
         public Look Look = new Look();
+        public Meal Meal;           // while it is eating, or waiting for a drop
         public string Phase = "idle";
         public bool Listening;
         public int Opacity100 = 100;
@@ -83,15 +86,50 @@ namespace MiniBot
         Point pressScreen;
         Point pressLocation;
         string lastKey = "";
+        bool hadMeal;
 
         public BotWindow()
         {
             Text = "Mini Bot";
+            AllowDrop = true;
+        }
+
+        static bool HasFiles(DragEventArgs e) { return e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop); }
+
+        protected override void OnDragEnter(DragEventArgs e)
+        {
+            base.OnDragEnter(e);
+            Accept(e);
+        }
+
+        protected override void OnDragOver(DragEventArgs e)
+        {
+            base.OnDragOver(e);
+            Accept(e);
+        }
+
+        void Accept(DragEventArgs e)
+        {
+            e.Effect = HasFiles(e) ? DragDropEffects.Copy : DragDropEffects.None;
+            if (e.Effect != DragDropEffects.None && DropHover != null) DropHover();
+        }
+
+        protected override void OnDragDrop(DragEventArgs e)
+        {
+            base.OnDragDrop(e);
+            if (!HasFiles(e) || FilesDropped == null) return;
+            var paths = e.Data.GetData(DataFormats.FileDrop) as string[];
+            if (paths == null || paths.Length == 0) return;
+            var at = PointToClient(new Point(e.X, e.Y));
+            FilesDropped(paths, new PointF(at.X, at.Y));
         }
 
         /// <summary>Redraws if anything visible changed or the character is animating.</summary>
         public void Redraw(double t, bool force)
         {
+            if (Meal != null && Meal.Done) Meal = null;
+            Look.Meal = Meal;
+            if ((Meal != null) != hadMeal) { hadMeal = Meal != null; force = true; }   // draw the last frame of a meal, and the plain bot after it
             bool animated = Painter.IsAnimated(Look, Phase, Listening);
             string key = Look.Avatar + Look.Skin + Look.Accent + Look.Name + Look.Size + Look.Idle + Look.Speed + Look.Reduced
                 + Phase + Listening + Opacity100;

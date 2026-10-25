@@ -66,8 +66,13 @@ export type RuntimeState = {
   bridge: { connected: boolean; queued: number }
 }
 
-/** A screenshot taken with the bot, saved by the companion (it accepts no other file). */
-export type Attachment = { type: 'image'; path: string }
+/**
+ * What can ride along with a prompt: a screenshot the companion saved, or the path of a file or
+ * folder the person dropped on the bot. `direct` is false for a type Claude's Read tool may not open.
+ */
+export type Attachment =
+  | { type: 'image'; path: string }
+  | { type: 'file'; path: string; kind: 'file' | 'folder'; direct: boolean }
 
 /** A prompt typed or spoken into the floating bot, waiting for Claude Code. */
 export type QueuedPrompt = { id: string; text: string; source: 'text' | 'voice'; attachments?: Attachment[]; at: number }

@@ -9,6 +9,7 @@
 // in this window talks to a model.
 
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -22,7 +23,9 @@ namespace MiniBot
         public event Action MicHoldStarted;                // Space held down in the empty prompt: start listening
         public event Action MicHoldReleased;               // ...and let go: finish listening
         public event Action ScreenshotRequested;
-        public event Action AttachmentRemoved;
+        public event Action<int> ChipRemoved;              // the x on an attachment chip: its position in the row
+        public event Action<string[]> FilesDropped;        // files or folders dropped on the panel, or pasted from the clipboard
+        public event Action DropHover;                     // a drag with files is over the panel (again and again while it stays)
         public event Action SettingsRequested;
         public event Action CloseRequested;
         public event Action ConsentAllowed;
@@ -56,8 +59,7 @@ namespace MiniBot
         readonly IconButton btnClose = new IconButton("close");
         readonly IconButton btnMic = new IconButton("mic");
         readonly IconButton btnShot = new IconButton("camera");
-        readonly Label chip = new Label();
-        readonly IconButton btnUnattach = new IconButton("close");
+        readonly ChipBar chips = new ChipBar();
         readonly IconButton btnSend = new IconButton("send");
         readonly TextButton btnAllow = new TextButton("Allow");
         readonly TextButton btnNotNow = new TextButton("Not now");
@@ -76,8 +78,6 @@ namespace MiniBot
         bool hasResponse;
         bool settingText;
         bool noticeIsError;
-        string attachment = "";
-        Rectangle chipRect;
         string promptShown = "";
         string replyShown = "";
         bool replyIsError;
@@ -151,15 +151,10 @@ namespace MiniBot
             tips.SetToolTip(btnClose, "Close");
             tips.SetToolTip(btnMic, "Speak a prompt");
             tips.SetToolTip(btnShot, "Take a screenshot");
-            tips.SetToolTip(btnUnattach, "Remove the screenshot");
-            chip.Font = Ui.Mono(9f);
-            chip.AutoSize = false;
-            chip.TextAlign = ContentAlignment.MiddleLeft;
-            chip.AccessibleName = "Attached screenshot";
             tips.SetToolTip(btnSend, "Send");
             btnSend.Primary = true;
 
-            Control[] all = { meter, title, status, notice, response, input, btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend, chip, btnUnattach, btnAllow, btnNotNow, btnContinue, btnSkip };
+            Control[] all = { meter, title, status, notice, response, input, btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend, chips, btnAllow, btnNotNow, btnContinue, btnSkip };
             foreach (var c in all) Controls.Add(c);
             btnAllow.Primary = true;
             btnContinue.Primary = true;
@@ -175,7 +170,7 @@ namespace MiniBot
             btnSettings.Click += delegate { Raise(SettingsRequested); };
             btnMic.Click += delegate { Raise(MicRequested); };
             btnShot.Click += delegate { Raise(ScreenshotRequested); };
-            btnUnattach.Click += delegate { Raise(AttachmentRemoved); };
+            chips.Removed += delegate (int index) { if (ChipRemoved != null) ChipRemoved(index); };
             btnSend.Click += delegate { SendNow(); };
             btnAllow.Click += delegate { Raise(ConsentAllowed); };
             btnNotNow.Click += delegate { Raise(ConsentDeclined); };
@@ -186,8 +181,53 @@ namespace MiniBot
             input.KeyUp += OnInputKeyUp;
             input.LostFocus += delegate { if (!(ActiveForm is NoActivateForm)) EndHold(); };
 
+            HookDrop(this);
             ApplyPalette(pal);
             Relayout();
+        }
+
+        // ---- files dropped on the panel, or pasted ----
+
+        /// <summary>Files can be dropped anywhere on the panel, whichever control is under the pointer.</summary>
+        void HookDrop(Control c)
+        {
+            c.AllowDrop = true;
+            c.DragEnter += OnDragFiles;
+            c.DragOver += OnDragFiles;
+            c.DragDrop += OnDropFiles;
+            foreach (Control child in c.Controls) HookDrop(child);
+        }
+
+        static bool HasFiles(DragEventArgs e) { return e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop); }
+
+        void OnDragFiles(object sender, DragEventArgs e)
+        {
+            bool files = HasFiles(e) && mode == Chat;
+            e.Effect = files ? DragDropEffects.Copy : DragDropEffects.None;
+            if (files) Raise(DropHover);
+        }
+
+        void OnDropFiles(object sender, DragEventArgs e)
+        {
+            if (!HasFiles(e) || mode != Chat) return;
+            var paths = e.Data.GetData(DataFormats.FileDrop) as string[];
+            if (paths != null && paths.Length > 0 && FilesDropped != null) FilesDropped(paths);
+        }
+
+        /// <summary>Ctrl+V with files copied in Explorer attaches them, as dropping them would.</summary>
+        bool TryPasteFiles()
+        {
+            try
+            {
+                if (!Clipboard.ContainsFileDropList()) return false;
+                var list = Clipboard.GetFileDropList();
+                var paths = new string[list.Count];
+                list.CopyTo(paths, 0);
+                if (paths.Length == 0 || FilesDropped == null) return false;
+                FilesDropped(paths);
+                return true;
+            }
+            catch (Exception) { return false; }
         }
 
         protected override CreateParams CreateParams
@@ -204,6 +244,12 @@ namespace MiniBot
 
         void OnInputKey(object sender, KeyEventArgs e)
         {
+            if (e.Control && !e.Alt && e.KeyCode == Keys.V && mode == Chat && TryPasteFiles())
+            {
+                e.SuppressKeyPress = true;
+                e.Handled = true;
+                return;
+            }
             if (e.KeyCode == Keys.Space && !e.Control && !e.Alt && mode == Chat)
             {
                 if (!spaceDown)
@@ -263,7 +309,7 @@ namespace MiniBot
         {
             var text = input.Text.Trim();
             // A screenshot can be sent on its own; Claude is then asked to take a look at it.
-            if ((text.Length > 0 || attachment.Length > 0) && SendRequested != null) SendRequested(text);
+            if ((text.Length > 0 || chips.Count > 0) && SendRequested != null) SendRequested(text);
         }
 
         void FinishOnboarding()
@@ -271,18 +317,32 @@ namespace MiniBot
             if (OnboardingContinued != null) OnboardingContinued(input.Text.Trim());
         }
 
-        void UpdateSendEnabled() { btnSend.Enabled = input.Text.Trim().Length > 0 || attachment.Length > 0; }
+        void UpdateSendEnabled() { btnSend.Enabled = input.Text.Trim().Length > 0 || chips.Count > 0; }
 
-        /// <summary>The screenshot that goes with the next prompt, as a short label; "" for none.</summary>
-        public void SetAttachment(string label)
+        /// <summary>The screenshot, files and folders that go with the next prompt, as chips; none to clear them.</summary>
+        public void SetChips(IList<Chip> items)
         {
-            label = label ?? "";
-            if (label == attachment) return;
-            attachment = label;
-            chip.Text = label.Length > 0 ? "\u25A3 " + label : "";
-            input.Hint = label.Length > 0 ? "Ask about this screenshot..." : "Type, or hold Space to talk";
+            items = items ?? new List<Chip>();
+            chips.SetItems(items);
+            UpdateHint();
             UpdateSendEnabled();
             Relayout();
+        }
+
+        /// <summary>The grey line in the empty prompt: what to do, or what the attachments are there for.</summary>
+        void UpdateHint()
+        {
+            if (mode == Onboarding) { input.Hint = "A name for your bot (optional)"; return; }
+            var items = chips.Items;
+            bool shots = false, files = false;
+            foreach (var chip in items)
+            {
+                if (chip.Kind == Chip.Shot) shots = true; else files = true;
+            }
+            input.Hint = items.Count == 0 ? "Type, or hold Space to talk"
+                : shots && !files ? "Ask about this screenshot..."
+                : files && !shots ? (items.Count == 1 ? "Ask about this " + (items[0].Kind == Chip.Folder ? "folder" : "file") + "..." : "Ask about these files...")
+                : "Ask about these...";
         }
 
         // ---- what the App sets ----
@@ -299,8 +359,7 @@ namespace MiniBot
             response.BackColor = p.Field; response.ForeColor = p.Fg;
             input.BackColor = p.Bg; input.ForeColor = p.Fg; input.HintColor = p.Muted;
             foreach (var b in new[] { btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
-            btnUnattach.Colors = p; btnUnattach.BackColor = p.UserMessage; btnUnattach.Invalidate();
-            chip.BackColor = p.UserMessage; chip.ForeColor = p.Fg;
+            chips.Colors = p; chips.BackColor = p.Bg; chips.Invalidate();
             foreach (var b in new[] { btnAllow, btnNotNow, btnContinue, btnSkip }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
             RenderConversation();
             Invalidate();
@@ -419,7 +478,7 @@ namespace MiniBot
             mode = Chat;
             notice.Text = "";
             SetInput("");
-            input.Hint = "Type, or hold Space to talk";
+            UpdateHint();
             Relayout();
         }
 
@@ -605,17 +664,13 @@ namespace MiniBot
                 y += Ui.Px(30) + gap;
             }
 
-            bool showChip = chat && attachment.Length > 0;
-            chip.Visible = btnUnattach.Visible = showChip;
-            if (showChip)
+            int chipsH = chat && chips.Count > 0 ? chips.HeightFor(inner) : 0;
+            chips.Visible = chipsH > 0;
+            if (chipsH > 0)
             {
-                int ch = Ui.Px(26);
-                chipRect = new Rectangle(m, y, Math.Min(inner, TextRenderer.MeasureText(chip.Text, chip.Font).Width + Ui.Px(44)), ch);
-                chip.SetBounds(chipRect.X + Ui.Px(8), chipRect.Y + 1, chipRect.Width - Ui.Px(36), ch - 2);
-                btnUnattach.SetBounds(chipRect.Right - Ui.Px(26), chipRect.Y + 1, Ui.Px(24), ch - 2);
-                y += ch + Ui.Px(6);
+                chips.SetBounds(m, y, inner, chipsH);
+                y += chipsH + Ui.Px(6);
             }
-            else chipRect = Rectangle.Empty;
 
             // The prompt: one line, growing to MaxInputLines as the text wraps, then it scrolls.
             btnMic.Visible = btnShot.Visible = btnSend.Visible = !onboarding;
@@ -925,12 +980,6 @@ namespace MiniBot
             using (var brush = new SolidBrush(pal.Muted))
                 g.DrawString(">", font, brush, inputRect.X + Ui.Px(9), inputRect.Y + (Ui.Px(38) - font.Height) / 2f);
 
-            if (!chipRect.IsEmpty)
-            {
-                using (var path = Shapes.Round(chipRect, Ui.Px(6)))
-                using (var fill = new SolidBrush(pal.UserMessage))
-                    g.FillPath(fill, path);
-            }
             if (!responseRect.IsEmpty)
             {
                 using (var path = Shapes.Round(responseRect, Ui.Px(8)))

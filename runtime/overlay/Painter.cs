@@ -19,6 +19,7 @@ namespace MiniBot
         public string Speed = "normal";
         public bool Reduced;
         public string Size = "medium";
+        public Meal Meal;        // set while it is eating something dropped on it (or waiting to)
     }
 
     public static class Painter
@@ -54,7 +55,7 @@ namespace MiniBot
         public static bool IsAnimated(Look look, string phase, bool listening)
         {
             if (look.Reduced) return false;
-            if (look.Idle != "none") return true;
+            if (look.Meal != null || look.Idle != "none") return true;
             return listening || phase == "sending" || phase == "thinking" || phase == "working";
         }
 
@@ -94,6 +95,7 @@ namespace MiniBot
             {
                 float x0 = PadX(s), y0 = PadTop(s);
                 DrawCharacter(g, x0, y0, s, look, phase, listening, t);
+                if (look.Meal != null && !look.Reduced) DrawFlyingFile(g, x0, y0, s, look);
                 if (showName) DrawName(g, look.Name, size.Width, y0 + ArtHeight(look.Avatar, s) + s * 0.06f);
             }
             return bmp;
@@ -114,6 +116,42 @@ namespace MiniBot
                 DrawCharacter(g, px * 0.04f, px * 0.04f, px * 0.92f, look, "idle", false, 0);
             }
             return bmp;
+        }
+
+        /// <summary>The dropped file on its way to the mouth: a small page that shrinks as it goes in.</summary>
+        static void DrawFlyingFile(Graphics g, float x0, float y0, float s, Look look)
+        {
+            var pose = look.Meal.Pose();
+            if (pose.Fly < 0 || pose.Fly >= 1) return;
+            float p = (float)(pose.Fly * pose.Fly);   // it speeds up as it nears the mouth
+            PointF mouth = look.Avatar == "clawd" ? Clawd.MouthAt(x0, y0, s) : new PointF(x0 + s / 2f, y0 + s * 0.68f);
+            PointF from = look.Meal.From.HasValue ? look.Meal.From.Value : new PointF(mouth.X + s * 0.12f, y0 - s * 0.24f);
+            float x = from.X + (mouth.X - from.X) * p;
+            float y = from.Y + (mouth.Y - from.Y) * p - (float)Math.Sin(Math.PI * p) * s * 0.10f;
+            float w = s * 0.20f * (1f - 0.65f * p);
+            int stack = Math.Min(3, look.Meal.Count);
+            for (int i = stack - 1; i >= 0; i--)
+                DrawPage(g, x + i * w * 0.22f, y - i * w * 0.18f, w);
+        }
+
+        static void DrawPage(Graphics g, float cx, float cy, float w)
+        {
+            float h = w * 1.25f, fold = w * 0.32f;
+            float left = cx - w / 2f, top = cy - h / 2f, right = left + w, bottom = top + h;
+            var outline = new[]
+            {
+                new PointF(left, top), new PointF(right - fold, top), new PointF(right, top + fold), new PointF(right, bottom), new PointF(left, bottom)
+            };
+            using (var fill = new SolidBrush(Color.FromArgb(246, 246, 248))) g.FillPolygon(fill, outline);
+            using (var corner = new SolidBrush(Color.FromArgb(205, 205, 212)))
+                g.FillPolygon(corner, new[] { new PointF(right - fold, top), new PointF(right, top + fold), new PointF(right - fold, top + fold) });
+            using (var pen = new Pen(Color.FromArgb(70, 66, 80), Math.Max(1f, w * 0.06f)) { LineJoin = LineJoin.Round })
+                g.DrawPolygon(pen, outline);
+            using (var line = new Pen(Color.FromArgb(150, 146, 160), Math.Max(1f, w * 0.06f)))
+            {
+                g.DrawLine(line, left + w * 0.18f, top + h * 0.52f, right - w * 0.18f, top + h * 0.52f);
+                g.DrawLine(line, left + w * 0.18f, top + h * 0.70f, right - w * 0.34f, top + h * 0.70f);
+            }
         }
 
         static void DrawName(Graphics g, string name, int width, float y)
@@ -156,6 +194,15 @@ namespace MiniBot
                 : phase == "thinking" || phase == "sending" ? "thinking"
                 : phase == "working" ? "focused"
                 : "idle";
+
+            if (look.Meal != null && !look.Reduced)
+            {
+                var meal = look.Meal.Pose();
+                if (meal.Squash) bob += s * 0.03f;
+                if (meal.Shake != 0) x0 += meal.Shake * s * 0.03f;
+                blink = meal.Eyes == "closed";
+                mood = look.Meal.Stage == Meal.Refuse ? "worried" : meal.Mouth > 0 ? "eat" + meal.Mouth : meal.Arms == "up" ? "happy" : "idle";
+            }
 
             // Shadow, drawn first and shrinking a little as the character rises.
             using (var shadow = new SolidBrush(Color.FromArgb(55, 0, 0, 0)))
@@ -375,6 +422,21 @@ namespace MiniBot
                         break;
                     case "listening":
                         g.DrawEllipse(pen, cx - mw * 0.22f, mouthY - mw * 0.1f, mw * 0.44f, mw * 0.5f);
+                        break;
+                    case "eat3":
+                    case "eat2":
+                        {
+                            // A mouth open for the next bite: wide, or half.
+                            bool wide = mood == "eat3";
+                            var mouth = new RectangleF(cx - mw * (wide ? 0.5f : 0.38f), mouthY - mw * 0.2f, mw * (wide ? 1.0f : 0.76f), mw * (wide ? 1.05f : 0.6f));
+                            using (var inside = new SolidBrush(mouthColor)) g.FillEllipse(inside, mouth);
+                            if (wide)
+                                using (var tongue = new SolidBrush(Color.FromArgb(235, 110, 125)))
+                                    g.FillEllipse(tongue, cx - mw * 0.24f, mouthY + mw * 0.5f, mw * 0.48f, mw * 0.28f);
+                        }
+                        break;
+                    case "eat1":
+                        g.DrawLine(pen, cx - mw * 0.32f, mouthY + mw * 0.1f, cx + mw * 0.32f, mouthY + mw * 0.1f);
                         break;
                     case "thinking":
                         g.DrawLine(pen, cx - mw * 0.25f, mouthY + mw * 0.1f, cx + mw * 0.25f, mouthY + mw * 0.1f);

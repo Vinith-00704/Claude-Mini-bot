@@ -13,21 +13,38 @@
 import { connect, request, type Link } from './client'
 import { loadConfig } from './config'
 import { syncConfig } from './lifecycle'
-import { MIN_RUNTIME_VERSION, type Engine, type Phase, type QueuedPrompt } from './types'
+import { MIN_RUNTIME_VERSION, type Attachment, type Engine, type Phase, type QueuedPrompt } from './types'
 
 const DEFAULT_SCREENSHOT_ASK = 'Take a look at this screenshot.'
 
+/** What Claude is asked when something was attached and nothing was typed. */
+function defaultAsk(images: number, files: Attachment[]): string {
+  if (files.length === 0) return DEFAULT_SCREENSHOT_ASK
+  if (images > 0 || files.length > 1) return 'Take a look at the attachments.'
+  return files[0]!.type === 'file' && files[0]!.kind === 'folder' ? 'Take a look at this folder.' : 'Take a look at this file.'
+}
+
+function describe(a: Attachment): string {
+  if (a.type === 'image') return `Screenshot from Mini Bot (an image file; open it with the Read tool): ${a.path}`
+  if (a.kind === 'folder') return `Folder from Mini Bot (list what is inside it, then open what matters): ${a.path}`
+  return a.direct
+    ? `File from Mini Bot (open it with the Read tool): ${a.path}`
+    : `File from Mini Bot (the Read tool may not open this type; use a command or script if you need what is inside): ${a.path}`
+}
+
 /**
- * The text Claude Code receives. A plugin's prompt cannot carry an image itself,
- * so a screenshot is named by its file, which Claude opens with its Read tool
- * (under Claude Code's own permission to read it).
+ * The text Claude Code receives. A plugin's prompt cannot carry an image or a file itself, so
+ * each is named by its path, which Claude opens with its own tools (under Claude Code's own
+ * permission to read it): the bot passes the path on and never reads the file.
  */
 export function composePrompt(prompt: Pick<QueuedPrompt, 'text' | 'attachments'>): string {
-  const images = (prompt.attachments ?? []).filter(a => a.type === 'image')
-  if (images.length === 0) return prompt.text
-  const ask = prompt.text.trim() === '' ? DEFAULT_SCREENSHOT_ASK : prompt.text
-  const lines = images.map(a => `Screenshot from Mini Bot (an image file; open it with the Read tool): ${a.path}`)
-  return `${ask}\n\n${lines.join('\n')}`
+  const attachments = prompt.attachments ?? []
+  if (attachments.length === 0) return prompt.text
+  const images = attachments.filter(a => a.type === 'image').length
+  const files = attachments.filter(a => a.type === 'file')
+  const ask = prompt.text.trim() === '' ? defaultAsk(images, files) : prompt.text
+  const ordered = [...attachments.filter(a => a.type === 'image'), ...files]
+  return `${ask}\n\n${ordered.map(describe).join('\n')}`
 }
 
 type ClaimReply = { prompts: QueuedPrompt[]; revision: number; version: number }

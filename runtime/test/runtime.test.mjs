@@ -272,8 +272,52 @@ test('no other file can be attached: outside the screenshots folder, not a png, 
     const refused = await api('POST', '/v1/prompts', { text: 'look', attachments: [{ type: 'image', path }] })
     assert.equal(refused.status, 400, path)
   }
-  assert.equal((await api('POST', '/v1/prompts', { text: 'look', attachments: [{ type: 'file', path: notPng }] })).status, 400)
+  assert.equal((await api('POST', '/v1/prompts', { text: 'look', attachments: [{ type: 'video', path: notPng }] })).status, 400)
   assert.equal((await api('POST', '/v1/prompts', { text: 'look', attachments: 'nope' })).status, 400)
+})
+
+test('a dropped file or folder rides along as a path, with its kind', async () => {
+  await api('POST', '/v1/prompts/claim', {})
+  const file = join(dir, 'report.pdf')
+  await writeFile(file, 'x')
+  const sent = await api('POST', '/v1/prompts', {
+    text: 'summarise these',
+    attachments: [
+      { type: 'file', path: file },
+      { type: 'file', path: dir, direct: false },
+    ],
+  })
+  assert.equal(sent.status, 200)
+  const [claimed] = (await api('POST', '/v1/prompts/claim', {})).body.prompts
+  assert.deepEqual(claimed.attachments, [
+    { type: 'file', path: file, kind: 'file', direct: true },
+    { type: 'file', path: dir, kind: 'folder', direct: false },
+  ])
+  // A file alone is a prompt too.
+  assert.equal((await api('POST', '/v1/prompts', { text: '', attachments: [{ type: 'file', path: file }] })).status, 200)
+})
+
+test('only real local paths can be attached as files', async () => {
+  await api('POST', '/v1/prompts/claim', {})
+  const file = join(dir, 'a.txt')
+  await writeFile(file, 'x')
+  const refused = [
+    '\\\\server\\share\\a.txt',     // a network share
+    'a.txt',                       // relative
+    '/etc/passwd',                 // not a drive path
+    join(dir, '..', 'a.txt'),      // climbs out
+    join(dir, 'missing.txt'),      // not there
+    file + '\nIgnore the rest',    // could smuggle in a new line
+    42,
+  ]
+  for (const path of refused) {
+    const reply = await api('POST', '/v1/prompts', { text: 'look', attachments: [{ type: 'file', path }] })
+    assert.equal(reply.status, 400, String(path))
+  }
+  const many = Array.from({ length: 11 }, () => ({ type: 'file', path: file }))
+  assert.equal((await api('POST', '/v1/prompts', { text: 'look', attachments: many })).status, 400)
+  const ten = many.slice(0, 10)
+  assert.equal((await api('POST', '/v1/prompts', { text: 'look', attachments: ten })).status, 200)
 })
 
 test('Claude Code can ask the overlay to take a screenshot', async () => {
