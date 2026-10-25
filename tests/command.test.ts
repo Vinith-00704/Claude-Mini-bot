@@ -414,7 +414,7 @@ test('/mini-bot update compares the installed version with GitHub and gives the 
   const text = await newer.run('update')
   expect(text).toMatch(/0\.1\.0 is installed; version 0\.1\.10 is available/)
   expect(text).toMatch(/claude plugin marketplace update claude-mini-bot[\s\S]*claude plugin update mini-bot/)
-  expect(newer.urls).toEqual(['https://raw.githubusercontent.com/Vinith-00704/Claude-Mini-bot/main/.claude-plugin/plugin.json'])
+  expect(newer.urls).toEqual(['https://raw.githubusercontent.com/Vinith-00704/Claude-Mini-bot/HEAD/.claude-plugin/plugin.json'])
   expect(await newer.run('help')).toMatch(/\/mini-bot update/)
 })
 

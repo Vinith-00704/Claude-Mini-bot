@@ -8,7 +8,7 @@
 import type { Engine } from './types'
 
 const REPO = 'Vinith-00704/Claude-Mini-bot'
-const MANIFEST_URL = `https://raw.githubusercontent.com/${REPO}/main/.claude-plugin/plugin.json`
+const MANIFEST_URL = `https://raw.githubusercontent.com/${REPO}/HEAD/.claude-plugin/plugin.json`   // HEAD: whatever the repository's default branch is
 
 const STEPS = `To update, run these two commands in a terminal (or at the Claude Code prompt with ! in front, e.g. ! claude plugin update mini-bot):
   claude plugin marketplace update claude-mini-bot
