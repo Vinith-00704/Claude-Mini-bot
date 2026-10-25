@@ -106,11 +106,16 @@ Taken from the app itself, not imitated:
 | **Click** the bot | open or close its small panel |
 | **Drag** the bot | move it (its position is saved with that bot; it stays on screen) |
 | **Right-click** the bot | Hide, Customize, Change bot, Permissions, Stop |
-| Type in the panel, **Enter** or the send button | send a prompt to Claude Code |
+| Type in the panel, **Enter** or the send button | send a prompt to Claude Code (**Shift+Enter** adds a line; the prompt grows up to six lines, then scrolls) |
+| **Drag** the panel's far edges or corner (the ones away from the bot) | resize the panel; the reply area takes the extra room. It is saved with that bot. **Double-click** an edge to reset |
+| The **arrows** button in the panel, or double-click its top | switch between the usual size and a large view (up to 60% of the screen's height) |
+| **Ctrl+Alt+arrows** in the panel | resize it from the keyboard (right and up grow it, left and down shrink it) |
 | The **microphone** button, or **holding Space** in the empty prompt | speak a prompt (see below) |
 | The **sliders** button in the panel | customize this bot |
 | The **snip** button in the panel, or right-click > Take screenshot | snip part of the screen and ask Claude about it (below) |
 | The tray icon | show or hide the bot, open the prompt, take a screenshot, customize, stop |
+
+The panel always sits beside the bot and never covers it or leaves the screen: if there is not room for the size you chose, the reply area is shortened (your chosen size is kept). Only the reply area changes height, so dragging an edge before there is a reply changes the width only. In Customize, **Long replies > Grow the panel** lets a long reply make the panel taller by itself (up to 60% of the screen's height, and never smaller than the size you chose), and **Chat panel > Reset to default size** puts it back. From Claude Code: `/mini-bot set panel-size 520x300` (width x reply height, in pixels), `set panel-size reset`, `set grow-replies on`.
 
 The panel shows what Claude Code is really doing: *Sending, Thinking, Working (and which tool), Done, Something went wrong*. The face and a small badge on the bot show the same. The reply text is shown only for prompts you sent from the bot; turns you start in Claude Code only show a state.
 

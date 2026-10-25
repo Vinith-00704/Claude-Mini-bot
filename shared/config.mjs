@@ -23,6 +23,11 @@ export const STARTUP_MODES = ['manual', 'restore', 'always']
 export const ACCENTS = ['claude', 'blue', 'green', 'pink', 'orange', 'purple']
 export const THEMES = ['dark', 'light']
 
+// The chat panel's size, in pixels at 100% scaling. `replyHeight` is the reply area only: the rest of
+// the panel (header, prompt, buttons) keeps its size, so the reply is what grows when the person drags.
+export const PANEL_WIDTH_RANGE = [320, 900]
+export const PANEL_REPLY_RANGE = [80, 600]
+
 export const MAX_PROFILES = 12
 export const MAX_NAME = 40
 export const MAX_NOTES = 280
@@ -34,6 +39,7 @@ export const defaultProfile = (id = 'default', name = 'Mini') => ({
   appearance: { skin: 'claude', size: 'medium', opacity: 100, accent: 'claude', theme: 'dark' },
   animation: { idle: 'subtle', speed: 'normal', reducedMotion: false },
   position: { anchor: 'bottom-right' },
+  panel: { width: 380, replyHeight: 150, autoFit: false },
   personality: { tone: 'neutral', notes: '' },
 })
 
@@ -76,6 +82,7 @@ export const normalizeProfile = (raw, index = 0, legacyPosition) => {
   const appearance = rec(p.appearance)
   const animation = rec(p.animation)
   const personality = rec(p.personality)
+  const panel = rec(p.panel)
   return {
     id: text(p.id, 64, '') || `profile-${index + 1}`,
     name: text(p.name, MAX_NAME, '').replace(/\s+/g, ' ').trim() || base.name,
@@ -94,6 +101,11 @@ export const normalizeProfile = (raw, index = 0, legacyPosition) => {
     },
     // Earlier versions kept one position for every bot; it moves into each bot.
     position: normalizePosition(p.position ?? legacyPosition),
+    panel: {
+      width: num(panel.width, ...PANEL_WIDTH_RANGE, base.panel.width),
+      replyHeight: num(panel.replyHeight, ...PANEL_REPLY_RANGE, base.panel.replyHeight),
+      autoFit: bool(panel.autoFit, base.panel.autoFit),
+    },
     personality: {
       tone: pick(personality.tone, TONES, base.personality.tone),
       notes: text(personality.notes, MAX_NOTES, ''),
@@ -233,7 +245,7 @@ const oneOf = (label, value, allowed) => (allowed.includes(value) ? null : `${la
 /** Why a profile patch is not acceptable, or null. A patch names only what changes. */
 export const checkPatch = patch => {
   const p = rec(patch)
-  const known = ['name', 'avatar', 'appearance', 'animation', 'position', 'personality']
+  const known = ['name', 'avatar', 'appearance', 'animation', 'position', 'panel', 'personality']
   const extra = Object.keys(p).find(k => !known.includes(k))
   if (extra) return `Unknown setting "${extra}".`
   if ('name' in p && typeof p.name !== 'string') return 'Name must be text.'
@@ -262,6 +274,11 @@ export const checkPatch = patch => {
     const isCustom = pos.anchor === 'custom' && Number.isFinite(pos.x) && Number.isFinite(pos.y)
     if (!isCustom && !ANCHORS.includes(pos.anchor)) return `Position is a corner (${ANCHORS.join(', ')}) or custom x and y.`
   }
+  const pn = rec(p.panel)
+  for (const [key, [min, max], label] of [['width', PANEL_WIDTH_RANGE, 'Panel width'], ['replyHeight', PANEL_REPLY_RANGE, 'Reply height']]) {
+    if (key in pn && !(Number.isInteger(pn[key]) && pn[key] >= min && pn[key] <= max)) return `${label} is a whole number from ${min} to ${max}.`
+  }
+  if ('autoFit' in pn && typeof pn.autoFit !== 'boolean') return 'Growing for long replies is on or off.'
   const s = rec(p.personality)
   if ('tone' in s) {
     const bad = oneOf('Tone', s.tone, TONES)
@@ -289,6 +306,7 @@ export const patchProfile = (config, id, patch) => {
     appearance: { ...profile.appearance, ...rec(patch.appearance) },
     animation: { ...profile.animation, ...rec(patch.animation) },
     position: patch.position ?? profile.position,
+    panel: { ...profile.panel, ...rec(patch.panel) },
     personality: { ...profile.personality, ...rec(patch.personality) },
   }
   return {
@@ -317,7 +335,7 @@ export const patchSettings = (config, patch) => {
 
 /**
  * One change asked for over the runtime's interface (`POST /v1/config/apply`),
- * by the floating UI: { op: 'create' | 'select' | 'rename' | 'delete' | 'update' | 'settings' | 'move', ... }.
+ * by the floating UI: { op: 'create' | 'select' | 'rename' | 'delete' | 'update' | 'settings' | 'move' | 'resize', ... }.
  */
 export const applyOp = (config, op) => {
   const o = rec(op)
@@ -336,6 +354,8 @@ export const applyOp = (config, op) => {
       return patchSettings(config, o.patch)
     case 'move':
       return patchProfile(config, config.activeProfileId, { position: { anchor: 'custom', x: o.x, y: o.y } })
+    case 'resize':
+      return patchProfile(config, config.activeProfileId, { panel: { width: o.width, replyHeight: o.replyHeight } })
     default:
       return { error: 'Unknown change.' }
   }

@@ -27,17 +27,31 @@ namespace MiniBot
 
     public class IconButton : Control
     {
-        public string Kind = "send";
+        string kind = "send";
         public Palette Colors = Ui.PaletteFor("dark", "claude");
         public bool Primary;
         public bool Active;     // e.g. the microphone while listening
         bool hover, pressed;
 
+        /// <summary>Which icon is drawn; the panel's size button swaps between "expand" and "collapse".</summary>
+        public string Kind
+        {
+            get { return kind; }
+            set
+            {
+                if (kind == value) return;
+                kind = value;
+                AccessibleName = value == "collapse" ? "Make the panel smaller" : value == "expand" ? "Make the panel larger" : AccessibleName;
+                Invalidate();
+            }
+        }
+
         public IconButton(string kind)
         {
-            Kind = kind;
+            this.kind = kind;
             AccessibleRole = AccessibleRole.PushButton;
-            AccessibleName = kind == "mic" ? "Microphone" : kind == "send" ? "Send" : kind == "close" ? "Close" : kind == "camera" ? "Screenshot" : "Customize";
+            AccessibleName = kind == "mic" ? "Microphone" : kind == "send" ? "Send" : kind == "close" ? "Close" : kind == "camera" ? "Screenshot"
+                : kind == "expand" ? "Make the panel larger" : kind == "collapse" ? "Make the panel smaller" : "Customize";
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint
                 | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
             Cursor = Cursors.Hand;
@@ -92,6 +106,20 @@ namespace MiniBot
                     case "stop":
                         g.FillRectangle(brush, cx - 5f * u, cy - 5f * u, 10f * u, 10f * u);
                         break;
+                    case "expand":
+                        // Two corner arrows pointing apart.
+                        g.DrawLine(pen, cx + 1.5f * u, cy - 1.5f * u, cx + 7f * u, cy - 7f * u);
+                        g.DrawLines(pen, new[] { new PointF(cx + 2.5f * u, cy - 7f * u), new PointF(cx + 7f * u, cy - 7f * u), new PointF(cx + 7f * u, cy - 2.5f * u) });
+                        g.DrawLine(pen, cx - 1.5f * u, cy + 1.5f * u, cx - 7f * u, cy + 7f * u);
+                        g.DrawLines(pen, new[] { new PointF(cx - 2.5f * u, cy + 7f * u), new PointF(cx - 7f * u, cy + 7f * u), new PointF(cx - 7f * u, cy + 2.5f * u) });
+                        break;
+                    case "collapse":
+                        // The same two arrows pointing together.
+                        g.DrawLine(pen, cx + 7f * u, cy - 7f * u, cx + 1.5f * u, cy - 1.5f * u);
+                        g.DrawLines(pen, new[] { new PointF(cx + 1.5f * u, cy - 6f * u), new PointF(cx + 1.5f * u, cy - 1.5f * u), new PointF(cx + 6f * u, cy - 1.5f * u) });
+                        g.DrawLine(pen, cx - 7f * u, cy + 7f * u, cx - 1.5f * u, cy + 1.5f * u);
+                        g.DrawLines(pen, new[] { new PointF(cx - 1.5f * u, cy + 6f * u), new PointF(cx - 1.5f * u, cy + 1.5f * u), new PointF(cx - 6f * u, cy + 1.5f * u) });
+                        break;
                     case "camera":
                         // A snip: four corner marks around a small lens.
                         float edge = 8f * u, c = 3.5f * u;
@@ -108,6 +136,48 @@ namespace MiniBot
                         g.FillEllipse(brush, cx - 6f * u, cy + 1.5f * u, 5f * u, 5f * u);
                         break;
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The prompt line. It is a multi-line box that the panel keeps one line tall until the text wraps
+    /// or Shift+Enter adds a line. A multi-line box has no built-in placeholder, so it paints its own.
+    /// </summary>
+    public class PromptBox : TextBox
+    {
+        const int WM_PAINT = 0x000F;
+        string hint = "";
+        public Color HintColor = Color.Gray;
+
+        public PromptBox()
+        {
+            Multiline = true;
+            WordWrap = true;
+            AcceptsReturn = true;   // Enter reaches OnInputKey, which sends; Shift+Enter falls through as a new line
+            ScrollBars = ScrollBars.None;
+        }
+
+        public string Hint
+        {
+            get { return hint; }
+            set { hint = value ?? ""; Invalidate(); }
+        }
+
+        protected override void OnTextChanged(EventArgs e)
+        {
+            base.OnTextChanged(e);
+            Invalidate();   // the hint goes away with the first character and comes back when the box is emptied
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg == WM_PAINT && hint.Length > 0 && TextLength == 0)
+            {
+                using (var g = Graphics.FromHwnd(Handle))
+                    TextRenderer.DrawText(g, hint, Font, ClientRectangle, HintColor,
+                        TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
             }
         }
     }

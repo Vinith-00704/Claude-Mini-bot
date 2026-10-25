@@ -74,6 +74,8 @@ namespace MiniBot
         readonly ChoiceStrip anim = new ChoiceStrip();
         readonly ChoiceStrip theme = new ChoiceStrip();
         readonly ChoiceStrip position = new ChoiceStrip();
+        readonly ChoiceStrip grow = new ChoiceStrip();
+        readonly TextButton btnResetPanel = new TextButton("Reset to default size");
         readonly TrackBar opacity = new TrackBar();
         readonly Label opacityValue = new Label();
         readonly Label error = new Label();
@@ -135,6 +137,10 @@ namespace MiniBot
             theme.Labels = new[] { "Dark", "Light" };
             position.Keys = new[] { "top-left", "top-right", "bottom-left", "bottom-right" };
             position.Labels = new[] { "↖", "↗", "↙", "↘" };
+            grow.Keys = new[] { "scroll", "grow" };
+            grow.Labels = new[] { "Scroll", "Grow the panel" };
+            grow.AccessibleName = "Long replies choice";
+            btnResetPanel.AccessibleName = "Reset the chat panel to its default size";
 
             avatar.AccessibleName = "Avatar choice"; skin.AccessibleName = "Skin choice"; accent.AccessibleName = "Accent choice"; size.AccessibleName = "Size choice";
             anim.AccessibleName = "Animation choice"; theme.AccessibleName = "Panel theme choice"; position.AccessibleName = "Position choice";
@@ -146,6 +152,11 @@ namespace MiniBot
             y = Row("anim", "Animation", anim, y, 34);
             y = Row("theme", "Panel theme", theme, y, 34);
             y = Row("position", "Position", position, y, 34);
+            y = Row("grow", "Long replies", grow, y, 34);
+            labels.Add(MakeLabel("Chat panel", m, y + Ui.Px(6), Ui.Px(96)));
+            btnResetPanel.Font = Ui.Font(8.5f, FontStyle.Bold);
+            btnResetPanel.SetBounds(m + Ui.Px(100), y, inner - Ui.Px(100), Ui.Px(30));
+            y += Ui.Px(40);
 
             labels.Add(MakeLabel("Opacity", m, y + Ui.Px(8), Ui.Px(96)));
             opacity.Minimum = 20;
@@ -166,7 +177,7 @@ namespace MiniBot
             ClientSize = new Size(ClientSize.Width, y + Ui.Px(34) + m);
 
             Control[] all = { bots, btnNew, btnDelete, preview, name, avatar, skin, accent, size, anim, theme, position,
-                              opacity, opacityValue, error, btnSave, btnCancel };
+                              grow, btnResetPanel, opacity, opacityValue, error, btnSave, btnCancel };
             foreach (var c in all) Controls.Add(c);
             AcceptButton = null;
             CancelButton = null;
@@ -184,6 +195,13 @@ namespace MiniBot
             anim.Changed += delegate { Edited("idle", anim.Selected); };
             theme.Changed += delegate { Edited("theme", theme.Selected); };
             position.Changed += delegate { Edited("anchor", position.Selected); customPosition = false; UpdatePositionLabel(); };
+            grow.Changed += delegate { Edited("autoFit", grow.Selected == "grow" ? "1" : "0"); };
+            btnResetPanel.Click += delegate
+            {
+                Edited("panelReset", "1");
+                btnResetPanel.Text = "Will reset when saved";
+                btnResetPanel.Invalidate();
+            };
             opacity.ValueChanged += delegate { Edited("opacity", opacity.Value.ToString()); };
             KeyPreview = true;
             KeyDown += delegate (object s, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Close(); };
@@ -231,8 +249,8 @@ namespace MiniBot
             preview.BackColor = p.Field;
             opacity.BackColor = p.Bg;
             name.Apply(p);
-            foreach (var s in new[] { avatar, skin, accent, size, anim, theme, position }) { s.Colors = p; s.Invalidate(); }
-            foreach (var b in new[] { btnNew, btnDelete, btnSave, btnCancel }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
+            foreach (var s in new[] { avatar, skin, accent, size, anim, theme, position, grow }) { s.Colors = p; s.Invalidate(); }
+            foreach (var b in new[] { btnNew, btnDelete, btnSave, btnCancel, btnResetPanel }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
             Invalidate();
         }
 
@@ -243,6 +261,7 @@ namespace MiniBot
             var a = Json.Obj(profile, "appearance");
             var n = Json.Obj(profile, "animation");
             var pos = Json.Obj(profile, "position");
+            var panel = Json.Obj(profile, "panel");
             return new Dictionary<string, string>
             {
                 { "name", Json.Str(profile, "name", "Mini") },
@@ -255,7 +274,9 @@ namespace MiniBot
                 { "idle", Json.Str(n, "idle", "subtle") },
                 { "speed", Json.Str(n, "speed", "normal") },
                 { "reduced", Json.Bool(n, "reducedMotion") ? "1" : "0" },
-                { "anchor", Json.Str(pos, "anchor", "bottom-right") }
+                { "anchor", Json.Str(pos, "anchor", "bottom-right") },
+                { "autoFit", Json.Bool(panel, "autoFit") ? "1" : "0" },
+                { "panelReset", "0" }
             };
         }
 
@@ -317,6 +338,9 @@ namespace MiniBot
             customPosition = Json.Str(Json.Obj(current, "position"), "anchor") == "custom";
             position.Selected = customPosition ? "" : draft["anchor"];
             UpdatePositionLabel();
+            grow.Selected = draft["autoFit"] == "1" ? "grow" : "scroll";
+            btnResetPanel.Text = "Reset to default size";
+            btnResetPanel.Invalidate();
             opacity.Value = Math.Max(20, Math.Min(100, int.Parse(draft["opacity"])));
             loading = false;
             opacityValue.Text = draft["opacity"] + "%";
@@ -429,6 +453,10 @@ namespace MiniBot
             if (animationPatch.Count > 0) patch["animation"] = animationPatch;
             if (draft["anchor"] != baseline["anchor"] && !customPosition)
                 patch["position"] = new Dictionary<string, object> { { "anchor", draft["anchor"] } };
+            var panelPatch = new Dictionary<string, object>();
+            if (draft["autoFit"] != baseline["autoFit"]) panelPatch["autoFit"] = draft["autoFit"] == "1";
+            if (draft["panelReset"] == "1") { panelPatch["width"] = 380; panelPatch["replyHeight"] = 150; }
+            if (panelPatch.Count > 0) patch["panel"] = panelPatch;
             if (patch.Count == 0) { Close(); return; }
             if (Run(new Dictionary<string, object> { { "op", "update" }, { "id", editingId }, { "patch", patch } })) Close();
         }

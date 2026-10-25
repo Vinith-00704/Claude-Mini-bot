@@ -144,6 +144,31 @@ test('a bot setting follows its bot, a global one does not', async () => {
   expect(volume.config.sound.volume).toBe(10)
 })
 
+test('the chat panel size is kept per bot, within the limits', async () => {
+  const two = ok(createProfile(defaultConfig(), 'Biscuit'))
+  expect(two.profiles.map(p => p.panel)).toEqual([
+    { width: 380, replyHeight: 150, autoFit: false },
+    { width: 380, replyHeight: 150, autoFit: false },
+  ])
+  const size = findField('panel-size')!
+  const set = size.apply(two, 'biscuit', '520 x 300')
+  if (!('config' in set)) throw new Error('should apply')
+  expect(set.config.profiles.map(p => p.panel.width)).toEqual([380, 520])
+  expect(set.config.profiles[1]?.panel.replyHeight).toBe(300)
+  const reset = size.apply(set.config, 'biscuit', 'reset')
+  expect('config' in reset && reset.config.profiles[1]?.panel).toEqual({ width: 380, replyHeight: 150, autoFit: false })
+  expect('error' in size.apply(two, 'biscuit', '100 x 300')).toBe(true)
+  expect('error' in size.apply(two, 'biscuit', 'huge')).toBe(true)
+  const grow = findField('grow-replies')!.apply(two, 'biscuit', 'on')
+  expect('config' in grow && grow.config.profiles[1]?.panel.autoFit).toBe(true)
+  // Whatever was stored is pulled back into range, and a bot saved before this existed gets the default.
+  const repaired = normalizeConfig({ profiles: [{ id: 'a', name: 'A', panel: { width: 5000, replyHeight: -3, autoFit: 'yes' } }, { id: 'b', name: 'B' }] })
+  expect(repaired.profiles.map(p => p.panel)).toEqual([
+    { width: 900, replyHeight: 80, autoFit: false },
+    { width: 380, replyHeight: 150, autoFit: false },
+  ])
+})
+
 test('arguments split on spaces and keep quoted names whole', async () => {
   expect(tokenize('bot rename "Old Name" "New Name"')).toEqual(['bot', 'rename', 'Old Name', 'New Name'])
   expect(tokenize('')).toEqual([])

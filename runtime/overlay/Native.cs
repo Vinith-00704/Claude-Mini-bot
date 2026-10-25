@@ -28,7 +28,6 @@ namespace MiniBot
         public const int WS_EX_LAYERED = 0x80000;
         public const int WS_EX_TOOLWINDOW = 0x80;
         public const int WS_EX_NOACTIVATE = 0x08000000;
-        public const int EM_SETCUEBANNER = 0x1501;
 
         [DllImport("user32.dll")]
         public static extern bool SetProcessDPIAware();
@@ -94,9 +93,6 @@ namespace MiniBot
         [DllImport("dwmapi.dll")]
         public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        public static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, string lParam);
-
         [DllImport("gdi32.dll")]
         public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
 
@@ -109,11 +105,47 @@ namespace MiniBot
         [DllImport("gdi32.dll")]
         public static extern bool DeleteObject(IntPtr hobject);
 
-        /// <summary>Greyed hint text inside an empty single-line text box.</summary>
-        public static void SetPlaceholder(TextBox box, string text)
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct TEXTMETRIC
         {
-            if (box.IsHandleCreated) SendMessage(box.Handle, EM_SETCUEBANNER, (IntPtr)1, text);
-            else box.HandleCreated += delegate { SendMessage(box.Handle, EM_SETCUEBANNER, (IntPtr)1, text); };
+            public int tmHeight, tmAscent, tmDescent, tmInternalLeading, tmExternalLeading, tmAveCharWidth, tmMaxCharWidth,
+                tmWeight, tmOverhang, tmDigitizedAspectX, tmDigitizedAspectY;
+            public char tmFirstChar, tmLastChar, tmDefaultChar, tmBreakChar;
+            public byte tmItalic, tmUnderlined, tmStruckOut, tmPitchAndFamily, tmCharSet;
+        }
+
+        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+        static extern bool GetTextMetrics(IntPtr hdc, out TEXTMETRIC metrics);
+
+        /// <summary>
+        /// The distance between two lines in an edit box. It is the font's height plus its external leading,
+        /// which can be a pixel more than Font.Height; sizing a box by Font.Height would show one line too few.
+        /// </summary>
+        public static int LineHeight(Font font)
+        {
+            using (var g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                IntPtr hdc = g.GetHdc();
+                IntPtr hfont = font.ToHfont();
+                IntPtr previous = SelectObject(hdc, hfont);
+                TEXTMETRIC tm;
+                bool ok = GetTextMetrics(hdc, out tm);
+                SelectObject(hdc, previous);
+                DeleteObject(hfont);
+                g.ReleaseHdc(hdc);
+                return ok ? tm.tmHeight + tm.tmExternalLeading : font.Height;
+            }
+        }
+
+        public const int EM_GETLINECOUNT = 0xBA;
+
+        [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+        public static extern IntPtr SendMessageRaw(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        /// <summary>How many lines (after word wrapping) a multi-line text box is showing.</summary>
+        public static int LineCount(TextBox box)
+        {
+            return box.IsHandleCreated ? (int)SendMessageRaw(box.Handle, EM_GETLINECOUNT, IntPtr.Zero, IntPtr.Zero) : 1;
         }
     }
 }

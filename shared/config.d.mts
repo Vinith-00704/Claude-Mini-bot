@@ -9,6 +9,8 @@ export declare const STARTUP_MODES: readonly ['manual', 'restore', 'always']
 export declare const ACCENTS: readonly ['claude', 'blue', 'green', 'pink', 'orange', 'purple']
 export declare const CONFIG_VERSION: 2
 export declare const THEMES: readonly ['dark', 'light']
+export declare const PANEL_WIDTH_RANGE: readonly [number, number]
+export declare const PANEL_REPLY_RANGE: readonly [number, number]
 export declare const MAX_PROFILES: number
 export declare const MAX_NAME: number
 export declare const MAX_NOTES: number
@@ -35,6 +37,8 @@ export type Profile = {
   /** `idle` is the animation intensity. */
   animation: { idle: IdleStyle; speed: Speed; reducedMotion: boolean }
   position: Position
+  /** The chat panel's size at 100% scaling; `replyHeight` is the reply area only. `autoFit` lets it grow for long replies. */
+  panel: { width: number; replyHeight: number; autoFit: boolean }
   /** Flavour for the character's own bubbles. Never added to Claude's prompt. */
   personality: { tone: Tone; notes: string }
 }
@@ -58,6 +62,7 @@ export type ProfilePatch = {
   appearance?: Partial<Profile['appearance']>
   animation?: Partial<Profile['animation']>
   position?: Position
+  panel?: Partial<Profile['panel']>
   personality?: Partial<Profile['personality']>
 }
 
@@ -79,6 +84,7 @@ export type Op =
   | { op: 'update'; id?: string; patch: ProfilePatch }
   | { op: 'settings'; patch: SettingsPatch }
   | { op: 'move'; x: number; y: number }
+  | { op: 'resize'; width: number; replyHeight: number }
 
 export declare function defaultProfile(id?: string, name?: string): Profile
 export declare function defaultConfig(): Config

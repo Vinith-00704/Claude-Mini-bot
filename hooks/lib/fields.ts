@@ -6,11 +6,14 @@
 // Changes go through the same patch functions the floating UI's go through.
 
 import { activeProfile, patchProfile, patchSettings } from './profiles'
+import { defaultProfile } from './config'
 import {
   ACCENTS,
   ANCHORS,
   AVATARS,
   IDLE_STYLES,
+  PANEL_REPLY_RANGE,
+  PANEL_WIDTH_RANGE,
   SIZES,
   SKINS,
   SPEEDS,
@@ -188,6 +191,27 @@ export const FIELDS: Field[] = [
       return { error: `Position is a corner (${ANCHORS.join(', ')}) or "x,y" in pixels.` }
     },
   },
+  {
+    id: 'panel-size',
+    group: 'size-position',
+    label: 'Chat panel size',
+    scope: 'profile',
+    kind: 'text',
+    show: (_config, profile) => `${profile.panel.width} x ${profile.panel.replyHeight} (width x reply height)`,
+    apply: (config, profileId, raw) => {
+      const word = raw.trim().toLowerCase()
+      const fresh = defaultProfile().panel
+      if (word === 'reset' || word === 'default') {
+        return done(patchProfile(config, profileId, { panel: { width: fresh.width, replyHeight: fresh.replyHeight } }))
+      }
+      const match = /^(\d{1,4})\s*[x, ]\s*(\d{1,4})$/.exec(word)
+      if (match) return done(patchProfile(config, profileId, { panel: { width: Number(match[1]), replyHeight: Number(match[2]) } }))
+      return {
+        error: `Chat panel size is "width x reply height" in pixels (width ${PANEL_WIDTH_RANGE.join('-')}, reply height ${PANEL_REPLY_RANGE.join('-')}), or "reset". You can also drag its edge.`,
+      }
+    },
+  },
+  boolField('grow-replies', 'size-position', 'Grow the panel for long replies', (_c, p) => p.panel.autoFit, { scope: 'profile', patch: autoFit => ({ panel: { autoFit } }) }),
   numberField('opacity', 'opacity', 'Opacity', [20, 100], ['100', '85', '70', '50'], (_c, p) => p.appearance.opacity, { scope: 'profile', patch: opacity => ({ appearance: { opacity } }) }),
   boolField('voice', 'sound', 'Voice', c => c.sound.voice, { scope: 'global', patch: voice => ({ sound: { voice } }) }),
   boolField('sound-effects', 'sound', 'Sound effects', c => c.sound.effects, { scope: 'global', patch: effects => ({ sound: { effects } }) }),

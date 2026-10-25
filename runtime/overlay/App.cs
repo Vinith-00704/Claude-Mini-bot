@@ -115,6 +115,10 @@ namespace MiniBot
             panel.MicHoldReleased += delegate { if (dict != null && dict.IsActive) dict.Stop(); };
             panel.ScreenshotRequested += delegate { panel.BeginInvoke(new Action(StartScreenshot)); };
             panel.AttachmentRemoved += ClearAttachment;
+            panel.SizeCommitted += delegate (int width, int replyHeight)
+            {
+                Try(delegate { st = api.Apply(Op("resize", "width", width, "replyHeight", replyHeight)); });
+            };
             panel.SettingsRequested += OpenSettings;
             panel.CloseRequested += HidePanel;
             panel.ConsentAllowed += GrantMicrophone;
@@ -225,6 +229,8 @@ namespace MiniBot
                 panel.ApplyPalette(Ui.PaletteFor(Json.Str(appearance, "theme", "dark"), Json.Str(appearance, "accent", "claude")));
             }
             panel.SetBot(look);
+            var size = Json.Obj(profile, "panel");
+            panel.SetPreferences(Json.Int(size, "width", 380), Json.Int(size, "replyHeight", 150), Json.Bool(size, "autoFit"));
             panel.SetStatus(phase, listening, Json.Str(activity, "detail"), Json.Str(activity, "id"));
             ShowReply(activity);
             panel.SetListening(listening);

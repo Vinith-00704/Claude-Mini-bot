@@ -29,7 +29,7 @@ const HELP = `Mini Bot: your floating character. Claude Code stays the intellige
   /mini-bot start | stop            start or stop the companion only
   /mini-bot status                  what is running, which bot, what access is in use
   /mini-bot settings [list]         change settings in a menu, or list them
-  /mini-bot set <field> <value>     e.g. set opacity 70, set skin ocean, set position bottom-left
+  /mini-bot set <field> <value>     e.g. set opacity 70, set skin ocean, set position bottom-left, set panel-size 520x300
   /mini-bot permissions             see, grant or revoke screen, microphone and computer access
   /mini-bot permissions grant|revoke <screen|microphone|computer|all>
   /mini-bot screenshot              snip part of the screen and ask Claude about it

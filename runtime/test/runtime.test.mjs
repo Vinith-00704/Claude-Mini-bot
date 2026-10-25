@@ -97,6 +97,25 @@ test('profile changes over the interface follow the same rules as typed ones', a
   assert.equal(gone.body.config.profiles.length, 1)
 })
 
+test('resizing the panel is saved on the active bot, within the limits', async () => {
+  const fresh = (await api('GET', '/v1/state')).body.config.profiles[0]
+  assert.deepEqual(fresh.panel, { width: 380, replyHeight: 150, autoFit: false })
+  for (const bad of [{ width: 100, replyHeight: 150 }, { width: 380, replyHeight: 9000 }, { width: 380.5, replyHeight: 150 }, { width: 'wide', replyHeight: 150 }, {}]) {
+    assert.equal((await api('POST', '/v1/config/apply', { op: 'resize', ...bad })).status, 400)
+  }
+  const resized = await api('POST', '/v1/config/apply', { op: 'resize', width: 520, replyHeight: 300 })
+  assert.equal(resized.status, 200)
+  assert.deepEqual(resized.body.config.profiles[0].panel, { width: 520, replyHeight: 300, autoFit: false })
+  const grown = await api('POST', '/v1/config/apply', { op: 'update', patch: { panel: { autoFit: true } } })
+  assert.deepEqual(grown.body.config.profiles[0].panel, { width: 520, replyHeight: 300, autoFit: true })
+  assert.equal((await api('POST', '/v1/config/apply', { op: 'update', patch: { panel: { autoFit: 'yes' } } })).status, 400)
+  // A second bot starts with the default size, and the first keeps its own.
+  const second = await api('POST', '/v1/config/apply', { op: 'create', name: 'Pixel' })
+  assert.deepEqual(second.body.config.profiles[1].panel, { width: 380, replyHeight: 150, autoFit: false })
+  assert.equal(second.body.config.profiles[0].panel.width, 520)
+  await api('POST', '/v1/config/apply', { op: 'delete', id: 'pixel' })
+})
+
 test('first-run setup: the name is optional and finishing is remembered', async () => {
   assert.equal((await api('GET', '/v1/state')).body.config.onboarded, false)
   const done = await api('POST', '/v1/config/apply', { op: 'settings', patch: { onboarded: true } })

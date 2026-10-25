@@ -31,6 +31,9 @@ namespace MiniBot
 
         public static int Px(int value) { return (int)Math.Round(value * Scale); }
 
+        /// <summary>The other way round: screen pixels back to the 100% pixels the configuration stores.</summary>
+        public static int Unpx(int value) { return (int)Math.Round(value / Scale); }
+
         public static Font Font(float points, FontStyle style = FontStyle.Regular)
         {
             return new Font("Segoe UI", points, style, GraphicsUnit.Point);

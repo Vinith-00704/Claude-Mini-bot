@@ -15,10 +15,10 @@ export async function editField($: Engine, field: Field, profileId: string): Pro
   let raw: string | undefined
 
   if (field.kind === 'text') {
-    const extra = field.id === 'notes' ? 'Clear notes' : 'Cancel'
+    const extra = field.id === 'notes' ? 'Clear notes' : field.id === 'panel-size' ? 'Reset to default' : 'Cancel'
     const answer = await ask($, `${field.label} (now: ${now}). Type the new value under "Other".`, ['Keep current', extra], field.label)
     if (answer === undefined || answer === 'Keep current' || (answer === 'Cancel' && field.id !== 'notes')) return
-    raw = answer === 'Clear notes' ? '' : answer
+    raw = answer === 'Clear notes' ? '' : answer === 'Reset to default' ? 'reset' : answer
   } else {
     const items: Item<string>[] = (field.options ?? []).map(o => ({ label: o, value: o }))
     const hint =
