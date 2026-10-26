@@ -10,6 +10,7 @@ export {
   ANCHORS,
   AVATARS,
   IDLE_STYLES,
+  MODEL_LABELS,
   PANEL_REPLY_RANGE,
   PANEL_WIDTH_RANGE,
   SIZES,
@@ -25,6 +26,7 @@ export type {
   Avatar,
   Config,
   IdleStyle,
+  ModelLabel,
   Op,
   Position,
   Profile,
@@ -63,6 +65,8 @@ export type RuntimeState = {
   indicator: { visible: boolean; kinds: Kind[] }
   activity: { phase: Phase; id: string | null; detail: string; source: 'bot' | 'claude' }
   voice: { state: 'idle' | 'listening'; error: string | null; heard: string | null }
+  /** What the session runs on, once it has said (absent from a companion that predates it). Ages are in milliseconds. */
+  session?: { model: string; name: string; effort: string | null; ageMs: number; switched: { from: string; to: string; ageMs: number } | null } | null
   bridge: { connected: boolean; queued: number }
 }
 

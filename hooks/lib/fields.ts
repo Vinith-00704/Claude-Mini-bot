@@ -12,6 +12,7 @@ import {
   ANCHORS,
   AVATARS,
   IDLE_STYLES,
+  MODEL_LABELS,
   PANEL_REPLY_RANGE,
   PANEL_WIDTH_RANGE,
   SIZES,
@@ -36,6 +37,7 @@ export type GroupId =
   | 'sound'
   | 'notifications'
   | 'startup'
+  | 'display'
   | 'personality'
 
 export const GROUPS: { id: GroupId; label: string }[] = [
@@ -47,6 +49,7 @@ export const GROUPS: { id: GroupId; label: string }[] = [
   { id: 'sound', label: 'Voice and sound' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'startup', label: 'Startup' },
+  { id: 'display', label: 'Model label' },
   { id: 'personality', label: 'Personality' },
 ]
 
@@ -221,6 +224,7 @@ export const FIELDS: Field[] = [
   boolField('notify-access-change', 'notifications', 'Notify when access changes', c => c.notifications.onAccessChange, { scope: 'global', patch: onAccessChange => ({ notifications: { onAccessChange } }) }),
   choiceField('startup', 'startup', 'Startup', STARTUP_MODES, c => c.startup.mode, { scope: 'global', patch: mode => ({ startup: { mode } }) }),
   boolField('stop-with-session', 'startup', 'Stop when Claude Code exits', c => c.startup.stopWithSession, { scope: 'global', patch: stopWithSession => ({ startup: { stopWithSession } }) }),
+  choiceField('model-label', 'display', 'Model and effort label', MODEL_LABELS, c => c.display.modelLabel, { scope: 'global', patch: modelLabel => ({ display: { modelLabel } }) }),
   choiceField('tone', 'personality', 'Tone', TONES, (_c, p) => p.personality.tone, { scope: 'profile', patch: tone => ({ personality: { tone } }) }),
   {
     id: 'notes',

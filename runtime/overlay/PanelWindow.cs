@@ -60,6 +60,7 @@ namespace MiniBot
         readonly IconButton btnMic = new IconButton("mic");
         readonly IconButton btnShot = new IconButton("camera");
         readonly ChipBar chips = new ChipBar();
+        readonly ModelLabel modelLbl = new ModelLabel();
         readonly IconButton btnSend = new IconButton("send");
         readonly TextButton btnAllow = new TextButton("Allow");
         readonly TextButton btnNotNow = new TextButton("Not now");
@@ -154,7 +155,7 @@ namespace MiniBot
             tips.SetToolTip(btnSend, "Send");
             btnSend.Primary = true;
 
-            Control[] all = { meter, title, status, notice, response, input, btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend, chips, btnAllow, btnNotNow, btnContinue, btnSkip };
+            Control[] all = { meter, title, status, notice, response, input, btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend, chips, modelLbl, btnAllow, btnNotNow, btnContinue, btnSkip };
             foreach (var c in all) Controls.Add(c);
             btnAllow.Primary = true;
             btnContinue.Primary = true;
@@ -360,9 +361,18 @@ namespace MiniBot
             input.BackColor = p.Bg; input.ForeColor = p.Fg; input.HintColor = p.Muted;
             foreach (var b in new[] { btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
             chips.Colors = p; chips.BackColor = p.Bg; chips.Invalidate();
+            modelLbl.Colors = p; modelLbl.BackColor = p.Bg; modelLbl.Invalidate();
             foreach (var b in new[] { btnAllow, btnNotNow, btnContinue, btnSkip }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
             RenderConversation();
             Invalidate();
+        }
+
+        /// <summary>Which model the session runs on, its effort, how much to show of that (full, model, off), and a note while it has just changed.</summary>
+        public void SetModel(string name, string effort, string labelMode, string note)
+        {
+            bool before = modelLbl.HasContent;
+            modelLbl.Set(name, effort, labelMode, note);
+            if (before != modelLbl.HasContent) Relayout();
         }
 
         /// <summary>The bot's name and face, shown at the top of the panel.</summary>
@@ -637,6 +647,15 @@ namespace MiniBot
             btnSettings.SetBounds(w - m - 2 * bs - Ui.Px(2), y, bs, bs);
             btnExpand.SetBounds(w - m - 3 * bs - Ui.Px(4), y, bs, bs);
             y += face + gap;
+
+            // Under the header: which model the session runs on and its effort (a thin line, tucked up to the header).
+            bool showModel = !onboarding && modelLbl.HasContent;
+            modelLbl.Visible = showModel;
+            if (showModel)
+            {
+                modelLbl.SetBounds(m, y - Ui.Px(4), inner, Ui.Px(16));
+                y += Ui.Px(14);
+            }
 
             response.Visible = ReplyShown;
             if (ReplyShown)

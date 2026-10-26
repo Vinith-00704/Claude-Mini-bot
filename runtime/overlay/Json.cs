@@ -49,7 +49,11 @@ namespace MiniBot
         public static int Int(object parent, string key, int fallback = 0)
         {
             var v = Raw(parent, key);
-            if (v is int || v is long || v is double || v is decimal) return Convert.ToInt32(v);
+            if (v is int || v is long || v is double || v is decimal)
+            {
+                double d = Convert.ToDouble(v);   // a very large number (a long time in milliseconds) stops at the biggest int
+                return d >= int.MaxValue ? int.MaxValue : d <= int.MinValue ? int.MinValue : (int)d;
+            }
             return fallback;
         }
 

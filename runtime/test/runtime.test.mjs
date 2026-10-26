@@ -241,6 +241,36 @@ test('activity follows what Claude Code reports, and settles back to idle', asyn
   assert.equal((await api('POST', '/v1/activity', { phase: 'dancing' })).status, 400)
 })
 
+test('the session says which model it runs on, and a changed model is noticed', async () => {
+  assert.equal((await api('GET', '/v1/state')).body.session, null)
+  const first = await api('POST', '/v1/session', { model: 'claude-opus-5-5', name: 'Opus 5.5', effort: 'high' })
+  assert.equal(first.status, 200)
+  assert.deepEqual(first.body.session, { model: 'claude-opus-5-5', name: 'Opus 5.5', effort: 'high', ageMs: 0, switched: null })
+  // A new effort alone is not a switch.
+  clock.t += 2000
+  const harder = await api('POST', '/v1/session', { model: 'claude-opus-5-5', name: 'Opus 5.5', effort: 'max' })
+  assert.equal(harder.body.session.effort, 'max')
+  assert.equal(harder.body.session.switched, null)
+  // The same thing again changes nothing, not even how long it has been so.
+  clock.t += 1000
+  assert.equal((await api('POST', '/v1/session', { model: 'claude-opus-5-5', name: 'Opus 5.5', effort: 'max' })).body.session.ageMs, 1000)
+  const other = await api('POST', '/v1/session', { model: 'claude-sonnet-5-5', name: 'Sonnet 5.5', effort: null })
+  assert.deepEqual(other.body.session.switched, { from: 'Opus 5.5', to: 'Sonnet 5.5', ageMs: 0 })
+  assert.equal(other.body.session.effort, null)
+  clock.t += 3000
+  assert.equal((await api('GET', '/v1/state')).body.session.switched.ageMs, 3000)
+})
+
+test('the session report is checked and cleaned', async () => {
+  for (const body of [{}, { model: '' }, { model: 42 }, { model: 'x', effort: 'extreme' }, { model: 'x', effort: 3 }]) {
+    assert.equal((await api('POST', '/v1/session', body)).status, 400, JSON.stringify(body))
+  }
+  const odd = await api('POST', '/v1/session', { model: 'weird\u0000\nmodel', name: 'A'.repeat(200) })
+  assert.equal(odd.body.session.model, 'weirdmodel')
+  assert.equal(odd.body.session.name.length, 40)
+  assert.equal((await api('POST', '/v1/session', { model: 'x' }, {})).status, 401)
+})
+
 test('the bot reports listening only as the microphone state allows', async () => {
   assert.equal((await api('POST', '/v1/voice', { state: 'shouting' })).status, 400)
   await grantAndStart('microphone')

@@ -12,6 +12,7 @@
 
 import { connect, request, type Link } from './client'
 import { loadConfig } from './config'
+import { effortLevel, friendlyModel } from './model-info'
 import { syncConfig } from './lifecycle'
 import { MIN_RUNTIME_VERSION, type Attachment, type Engine, type Phase, type QueuedPrompt } from './types'
 
@@ -64,6 +65,11 @@ let lastReport = ''
 let isOutdated = false
 let pending: QueuedPrompt[] = []
 let current: QueuedPrompt | null = null
+// What the session runs on, as last reported to the companion (the model's short name and effort), and what a turn last showed.
+let lastModelKey = ''
+let knownModel = ''
+let knownEffort: string | null = null
+let sessionUnsupported = false
 
 /** True when the companion is too old to carry prompts, so `/mini-bot status` can say so. */
 export function isRuntimeOutdated(): boolean {
@@ -109,6 +115,10 @@ export async function pump($: Engine): Promise<void> {
     link = await connect($)
     if (!link) return
     await syncConfig($, link)
+    // A companion that has just come up knows nothing about the session yet.
+    lastModelKey = ''
+    sessionUnsupported = false
+    await modelCheck($)
   }
   const reply = await request<ClaimReply>($, link, 'POST', '/v1/prompts/claim', {})
   if (!reply.ok) {
@@ -153,4 +163,44 @@ export async function turnEnded($: Engine, e: { answer: string; reason: string; 
     ? { text: phase === 'error' ? 'Claude Code could not finish that.' : answer, isError: phase === 'error' }
     : undefined
   await report($, { phase, id: mine?.id ?? null, source: mine ? 'bot' : 'claude', preview })
+}
+
+/** Tells the companion which model the session runs on and at what effort, when that is not what it was last told. */
+async function publishModel($: Engine, id: string, effort: string | null): Promise<void> {
+  if (!link || sessionUnsupported || id === '') return
+  const name = friendlyModel(id)
+  const key = `${name}|${effort ?? ''}`
+  if (key === lastModelKey) return
+  lastModelKey = key
+  const reply = await request($, link, 'POST', '/v1/session', { model: id, name, effort })
+  if (reply.ok) return
+  if (reply.status === 0) link = null
+  // A companion from before this existed has no such route: say nothing more to it.
+  else if (reply.status === 404) sessionUnsupported = true
+  else lastModelKey = ''
+}
+
+/**
+ * A request of the main conversation is about to go out: the model and effort it names are what the session
+ * runs on right now. A subagent's requests are its own business and are not shown.
+ */
+export async function stepStarted($: Engine, e: { model: string; effort?: unknown; agentId?: string }): Promise<void> {
+  if (e.agentId !== undefined) return
+  knownModel = friendlyModel(e.model)
+  knownEffort = effortLevel(e.effort)
+  await publishModel($, e.model, knownEffort)
+}
+
+/**
+ * Between requests, as a model is chosen with /model: ask the session which model it runs on. The effort is
+ * only known from a request, so after a change it is left out until the next one.
+ */
+export async function modelCheck($: Engine): Promise<void> {
+  if (!link) return
+  const id = await $.session.model()
+  if (typeof id !== 'string' || id === '') return
+  const name = friendlyModel(id)
+  // The session may name a model by an alias that a request resolves to a full id; the same model is not a change.
+  if (knownModel !== '' && !/\d/.test(name) && knownModel.toLowerCase().startsWith(name.toLowerCase())) return
+  await publishModel($, id, name === knownModel ? knownEffort : null)
 }

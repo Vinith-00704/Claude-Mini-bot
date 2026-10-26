@@ -6,6 +6,7 @@ export declare const SPEEDS: readonly ['slow', 'normal', 'fast']
 export declare const TONES: readonly ['neutral', 'cheerful', 'calm', 'playful']
 export declare const ANCHORS: readonly ['bottom-right', 'bottom-left', 'top-right', 'top-left']
 export declare const STARTUP_MODES: readonly ['manual', 'restore', 'always']
+export declare const MODEL_LABELS: readonly ['full', 'model', 'off']
 export declare const ACCENTS: readonly ['claude', 'blue', 'green', 'pink', 'orange', 'purple']
 export declare const CONFIG_VERSION: 2
 export declare const THEMES: readonly ['dark', 'light']
@@ -23,6 +24,7 @@ export type Speed = (typeof SPEEDS)[number]
 export type Tone = (typeof TONES)[number]
 export type Anchor = (typeof ANCHORS)[number]
 export type StartupMode = (typeof STARTUP_MODES)[number]
+export type ModelLabel = (typeof MODEL_LABELS)[number]
 export type Accent = (typeof ACCENTS)[number]
 export type Theme = (typeof THEMES)[number]
 
@@ -53,6 +55,7 @@ export type Config = {
   sound: { voice: boolean; effects: boolean; volume: number }
   notifications: { enabled: boolean; onTurnComplete: boolean; onAccessChange: boolean }
   startup: { mode: StartupMode; stopWithSession: boolean }
+  display: { modelLabel: ModelLabel }
   wasRunning: boolean
 }
 
@@ -70,6 +73,7 @@ export type SettingsPatch = {
   sound?: Partial<Config['sound']>
   notifications?: Partial<Config['notifications']>
   startup?: Partial<Config['startup']>
+  display?: Partial<Config['display']>
   onboarded?: boolean
   visible?: boolean
 }

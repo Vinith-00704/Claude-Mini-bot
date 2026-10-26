@@ -14,6 +14,8 @@ type Options = {
   /** The version on this computer, and the one on GitHub (null: GitHub cannot be reached). */
   installed?: string
   latest?: string | null
+  /** The model the session runs on (what `$.session.model()` answers). */
+  model?: string
 }
 
 const world = async ($: any, on: any, options: Options) => {
@@ -24,11 +26,13 @@ const world = async ($: any, on: any, options: Options) => {
   const asked: any[] = []
   const commands: string[][] = []
   const urls: string[] = []
+  let sessionModel = options.model ?? 'claude-opus-5-5'
   let runtimeConfig: any = normalizeConfig(undefined)
   const permissions: any = Object.fromEntries(
     ['screen', 'microphone', 'computer'].map(k => [k, { granted: false, grantedAt: null, active: false, activeSince: null }]),
   )
   let indicator: any = { visible: false, kinds: [] }
+  let session: any = null
 
   const setConfig = (next: unknown) => {
     const normalized: any = normalizeConfig(next)
@@ -45,6 +49,7 @@ const world = async ($: any, on: any, options: Options) => {
     indicator,
     activity: { phase: 'idle', id: null, detail: '', source: 'claude' },
     voice: { state: 'idle', error: null, heard: null },
+    session,
     bridge: { connected: true, queued: prompts.length },
   })
 
@@ -75,6 +80,11 @@ const world = async ($: any, on: any, options: Options) => {
     commands.push(e.argv ?? e.command ?? e.args)
     return { value: { exitCode: 1, stdout: '', stderr: '' } }
   })
+  on('session.model', () => ({ value: sessionModel }))
+  // The bottom of a model request: nothing is asked of a model in a test.
+  on('turn.step', async function* (_: any, e: any) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
   on('ui.status', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
   mock.env(on, { MINI_BOT_HOME: '/mb' })
@@ -102,6 +112,7 @@ const world = async ($: any, on: any, options: Options) => {
     })
     if (path === '/v1/health') return reply(200, { ok: true })
     if (path === '/v1/config' && method === 'PUT') setConfig(body)
+    else if (path === '/v1/session') session = { ...body, ageMs: 0, switched: null }
     else if (path === '/v1/visibility') setConfig({ ...runtimeConfig, visible: body.visible })
     else if (path === '/v1/prompts/claim') {
       if (options.legacy) return reply(404, { error: 'no such route' })
@@ -121,6 +132,7 @@ const world = async ($: any, on: any, options: Options) => {
     run,
     commands,
     urls,
+    setModel: (id: string) => (sessionModel = id),
     tick,
     requests,
     config,
@@ -475,4 +487,63 @@ test('/mini-bot update says when it is up to date', async ($, on) => {
 test('/mini-bot update still gives the commands when GitHub cannot be reached', async ($, on) => {
   const { run } = await world($, on, { running: false, installed: '0.2.0', latest: null })
   expect(await run('update')).toMatch(/Could not check GitHub[\s\S]*claude plugin update mini-bot/)
+})
+
+// ---- the model and effort the session runs on ----
+
+const sessionPosts = (requests: { method: string; path: string; body: any }[]) =>
+  requests.filter(r => r.path === '/v1/session').map(r => r.body)
+
+const step = async ($: any, input: Record<string, unknown>) => {
+  for await (const _ of $.turn.step({ turnId: 't1', index: 0, messageCount: 1, ...input })) void _
+}
+
+test('the model and effort of each request are told to the bot, and a subagent is left out', async ($, on) => {
+  const { requests, tick } = await world($, on, { running: true })
+  await tick()
+  // On connecting, the session's model is known but not yet its effort.
+  expect(sessionPosts(requests)).toEqual([{ model: 'claude-opus-5-5', name: 'Opus 5.5', effort: null }])
+  requests.length = 0
+
+  await step($, { model: 'claude-opus-5-5', effort: 'high' })
+  await tick()
+  expect(sessionPosts(requests)).toEqual([{ model: 'claude-opus-5-5', name: 'Opus 5.5', effort: 'high' }])
+  requests.length = 0
+
+  // Nothing new, nothing sent; a subagent's own model is not the session's.
+  await step($, { model: 'claude-opus-5-5', effort: 'high' })
+  await step($, { model: 'claude-haiku-5-5', effort: 'low', agentId: 'sub1' })
+  await tick()
+  expect(sessionPosts(requests)).toEqual([])
+
+  await step($, { model: 'claude-sonnet-5-5', effort: 'medium' })
+  await tick()
+  expect(sessionPosts(requests)).toEqual([{ model: 'claude-sonnet-5-5', name: 'Sonnet 5.5', effort: 'medium' }])
+})
+
+test('a model chosen with /model is noticed between requests, and an alias is not mistaken for a switch', async ($, on) => {
+  const { requests, tick, setModel } = await world($, on, { running: true })
+  await tick()
+  await step($, { model: 'claude-opus-5-5', effort: 'high' })
+  requests.length = 0
+
+  // The session names the same model by its alias: no change.
+  setModel('opus')
+  for (let i = 0; i < 5; i++) await tick()
+  expect(sessionPosts(requests)).toEqual([])
+
+  setModel('claude-sonnet-5-5')
+  for (let i = 0; i < 5; i++) await tick()
+  // Its effort is not known until a request says so.
+  expect(sessionPosts(requests)).toEqual([{ model: 'claude-sonnet-5-5', name: 'Sonnet 5.5', effort: null }])
+})
+
+test('/mini-bot status says which model the session runs on', async ($, on) => {
+  const { run, tick } = await world($, on, { running: true })
+  expect(await run('status')).not.toMatch(/Session model/)
+  await tick()
+  expect(await run('status')).toMatch(/Session model: Opus 5.5./)
+  await step($, { model: 'claude-opus-5-5', effort: 'xhigh' })
+  await tick()
+  expect(await run('status')).toMatch(/Session model: Opus 5.5, effort xhigh./)
 })

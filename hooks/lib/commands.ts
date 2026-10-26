@@ -52,6 +52,7 @@ async function describeStatus($: Engine): Promise<string> {
     `Mini Bot is ${state ? 'running' : 'stopped'} and ${shown ? 'visible' : 'hidden'}. Active bot: ${profile.name} (${profile.avatar}, ${profile.appearance.skin}).`,
     ...describeAccess(state),
   ]
+  if (state?.session) lines.push('Session model: ' + state.session.name + (state.session.effort ? ', effort ' + state.session.effort : '') + '.')
   if (state && (state.version < MIN_RUNTIME_VERSION || isRuntimeOutdated())) {
     lines.push('The companion is an older version and cannot carry prompts from the floating bot: /mini-bot stop, then /mini-bot start.')
   } else if (state) {

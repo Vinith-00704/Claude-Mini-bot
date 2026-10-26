@@ -143,6 +143,15 @@ A snipping tool in Claude Code's style. The screen is captured first, frozen and
 
 The first screenshot asks for screen access (in Claude Code's permission colour); nothing is captured without it, and it can be turned off from right-click > Permissions. Screenshots for Claude are kept in `%APPDATA%\ClaudeMiniBot\screenshots` and removed after a week. Besides screenshots saved there, only the paths of files and folders you drop on the bot (full local paths that exist) can be attached to a prompt; the runtime refuses anything else.
 
+### The model and effort label
+
+Under the panel's header a thin line shows what your Claude Code session is running on: `● Opus 5.5  ▮▮▮▯▯ high` (the model, and its effort as five bars from low to max). It follows each request, so it is what Claude is using right now, after any silent downgrade for the model. When the model changes (`/model`, or a fallback) the line says so for a few seconds in the accent colour: `Opus 5.5 → Sonnet 5.5`.
+
+- It is only ever shown: the bot cannot change the model or the effort. The Claude Code side reports it over the same local, authenticated channel as everything else.
+- The effort is known from the first request on, so right after a start (or a model change) only the model shows. A model with no effort setting shows no bars.
+- `/mini-bot set model-label full|model|off` chooses how much to show: both, the model alone, or nothing. `/mini-bot status` prints the same information.
+- Subagents' own models are not shown.
+
 ### Dropping files on the bot
 
 Drag files or folders from Explorer onto the bot (or onto its open panel) and it eats them: its mouth opens as soon as the drag is over it, the file flies in, it chews twice and swallows. A shrug means the kind of file is one Claude may not open directly. A shake of the head means nothing could be taken. Ctrl+V in the prompt does the same with files copied in Explorer. Nothing about the bot's look changes the rest of the time: the mouth only exists while it is eating, and with **reduced motion** on the animation is skipped (the files are still attached).
@@ -163,7 +172,7 @@ Per bot: name, avatar (Clawd, blob, robot, cat, ghost, bunny), skin (Claude's or
 | `/mini-bot` | menu: Hide / Unhide, Settings, Permissions, Change Bot, Start / Stop (four options at a time) |
 | `/mini-bot hide` · `show` · `toggle` | hide or restore the character; Claude Code stays connected |
 | `/mini-bot start` · `stop` | start or stop only the companion (overlay and runtime); Claude Code itself is never stopped |
-| `/mini-bot status` | what is running, the active bot, what access is in use, whether the bot is connected to this session |
+| `/mini-bot status` | what is running, the active bot, what access is in use, which model and effort the session runs on, whether the bot is connected to this session |
 | `/mini-bot settings [list]` · `set <field> <value>` | change settings by menu or by typing, e.g. `set opacity 70`, `set skin ocean`, `set accent pink` |
 | `/mini-bot permissions [grant\|revoke <screen\|microphone\|computer\|all>]` | see, grant or revoke access |
 | `/mini-bot switch [name]` · `create [name]` | change to another bot, or make one |

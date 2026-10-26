@@ -6,7 +6,7 @@
 
 import type { Register } from 'claude-code'
 
-import { pump, toolFinished, toolStarted, turnEnded, turnStarted } from './lib/bridge'
+import { modelCheck, pump, stepStarted, toolFinished, toolStarted, turnEnded, turnStarted } from './lib/bridge'
 import { connect } from './lib/client'
 import { loadConfig } from './lib/config'
 import { runCommand } from './lib/commands'
@@ -45,7 +45,10 @@ async function tick($: Engine) {
   try {
     await pump($)
     ticks += 1
-    if (ticks % STATUS_EVERY === 0) await refreshStatus($)
+    if (ticks % STATUS_EVERY === 0) {
+      await refreshStatus($)
+      await modelCheck($)
+    }
   } catch {
     // Try again next second.
   } finally {
@@ -73,6 +76,13 @@ export const register: Register = on => {
     void turnStarted($, e).catch(() => {})
 
     return next(e)
+  })
+
+  // Each request of the main conversation names its model and effort: noted for the bot to show, never changed.
+  on('turn.step', async function* ($, e, next) {
+    void stepStarted($, e).catch(() => {})
+
+    return yield* next(e)
   })
 
   on('tool.call', async ($, e, next) => {

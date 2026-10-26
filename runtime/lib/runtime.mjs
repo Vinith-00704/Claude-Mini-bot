@@ -11,6 +11,7 @@ import { Activity, Voice } from './activity.mjs'
 import { check, newToken } from './auth.mjs'
 import { Permissions } from './permissions.mjs'
 import { Prompts } from './prompts.mjs'
+import { Session } from './session.mjs'
 import { indicatorFor, isVisible } from './visibility.mjs'
 
 // 2: configuration owned here, prompt queue, activity and voice state.
@@ -48,6 +49,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
   const permissions = new Permissions({ now })
   const activity = new Activity({ now })
   const voice = new Voice()
+  const session = new Session({ now })
   const screenshotsDir = resolve(join(dataDir, 'screenshots'))
   const isScreenshot = path => {
     const full = resolve(path)
@@ -101,6 +103,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     indicator: indicatorFor(permissions),
     activity: activity.snapshot(),
     voice: voice.snapshot(),
+    session: session.snapshot(),
     bridge: { connected: prompts.isBridgeAlive, queued: prompts.size },
     paths: { screenshots: screenshotsDir },
     requests: { ...requests },
@@ -142,6 +145,11 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     },
     'POST /v1/activity': body => {
       activity.set(body)
+      return state()
+    },
+    // The Claude Code side says which model the session runs on and at what effort. Shown, never acted on.
+    'POST /v1/session': body => {
+      session.set(body)
       return state()
     },
     'POST /v1/voice': body => {

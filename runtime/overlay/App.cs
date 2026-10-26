@@ -200,6 +200,18 @@ namespace MiniBot
             };
         }
 
+        /// <summary>The model and effort the session reported, for the line under the panel's header.</summary>
+        void ShowModel(Dictionary<string, object> cfg)
+        {
+            var session = Json.Obj(st, "session");
+            var change = Json.Obj(session, "switched");
+            string note = "";
+            // For a few seconds after the model changes the line says so.
+            if (Json.Has(change, "to") && Json.Int(change, "ageMs", int.MaxValue) < 6000)
+                note = Json.Str(change, "from") + " → " +Json.Str(change, "to");
+            panel.SetModel(Json.Str(session, "name"), Json.Str(session, "effort"), Json.Str(Json.Obj(cfg, "display"), "modelLabel", "full"), note);
+        }
+
         string PositionKey()
         {
             var p = ActiveProfile();
@@ -234,6 +246,7 @@ namespace MiniBot
                 panel.ApplyPalette(Ui.PaletteFor(Json.Str(appearance, "theme", "dark"), Json.Str(appearance, "accent", "claude")));
             }
             panel.SetBot(look);
+            ShowModel(cfg);
             var size = Json.Obj(profile, "panel");
             panel.SetPreferences(Json.Int(size, "width", 380), Json.Int(size, "replyHeight", 150), Json.Bool(size, "autoFit"));
             panel.SetStatus(phase, listening, Json.Str(activity, "detail"), Json.Str(activity, "id"));

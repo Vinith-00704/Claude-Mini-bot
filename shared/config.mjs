@@ -19,6 +19,8 @@ export const SPEEDS = ['slow', 'normal', 'fast']
 export const TONES = ['neutral', 'cheerful', 'calm', 'playful']
 export const ANCHORS = ['bottom-right', 'bottom-left', 'top-right', 'top-left']
 export const STARTUP_MODES = ['manual', 'restore', 'always']
+// The label of the model and effort the session runs on, in the panel: both, the model alone, or nothing.
+export const MODEL_LABELS = ['full', 'model', 'off']
 // 'claude' is Claude Code's own accent, the colour of its spinner and prompt marks.
 export const ACCENTS = ['claude', 'blue', 'green', 'pink', 'orange', 'purple']
 export const THEMES = ['dark', 'light']
@@ -58,6 +60,7 @@ export const defaultConfig = () => ({
   sound: { voice: false, effects: false, volume: 50 },
   notifications: { enabled: true, onTurnComplete: false, onAccessChange: true },
   startup: { mode: 'restore', stopWithSession: false },
+  display: { modelLabel: 'full' },
   // Whether the companion was running when the person last started or stopped it.
   wasRunning: false,
 })
@@ -140,6 +143,7 @@ export const normalizeConfig = raw => {
   const sound = rec(c.sound)
   const notifications = rec(c.notifications)
   const startup = rec(c.startup)
+  const display = rec(c.display)
   return {
     version: CONFIG_VERSION,
     revision: num(c.revision, 0, Number.MAX_SAFE_INTEGER, 0),
@@ -161,6 +165,7 @@ export const normalizeConfig = raw => {
       mode: pick(startup.mode, STARTUP_MODES, base.startup.mode),
       stopWithSession: bool(startup.stopWithSession, base.startup.stopWithSession),
     },
+    display: { modelLabel: pick(display.modelLabel, MODEL_LABELS, base.display.modelLabel) },
     wasRunning: bool(c.wasRunning, base.wasRunning),
   }
 }
@@ -315,7 +320,7 @@ export const patchProfile = (config, id, patch) => {
   }
 }
 
-const SETTINGS_KEYS = ['sound', 'notifications', 'startup', 'onboarded', 'visible']
+const SETTINGS_KEYS = ['sound', 'notifications', 'startup', 'display', 'onboarded', 'visible']
 
 /** Applies changes that belong to the whole companion rather than one bot. */
 export const patchSettings = (config, patch) => {
@@ -329,6 +334,7 @@ export const patchSettings = (config, patch) => {
     sound: { ...config.sound, ...rec(p.sound) },
     notifications: { ...config.notifications, ...rec(p.notifications) },
     startup: { ...config.startup, ...rec(p.startup) },
+    display: { ...config.display, ...rec(p.display) },
   }
   return { config: normalizeConfig(merged), message: 'Settings updated.' }
 }
