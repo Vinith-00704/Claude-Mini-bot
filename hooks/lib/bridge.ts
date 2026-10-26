@@ -50,7 +50,7 @@ export function composePrompt(prompt: Pick<QueuedPrompt, 'text' | 'attachments'>
 
 type ClaimReply = { prompts: QueuedPrompt[]; revision: number; version: number }
 
-type Report = {
+export type Report = {
   phase: Phase
   id?: string | null
   detail?: string
@@ -80,7 +80,7 @@ function shortName(tool: string): string {
   return tool.replace(/^mcp__[^_]+(?:_[^_]+)*__/, '').slice(0, 40)
 }
 
-async function report($: Engine, what: Report): Promise<void> {
+export async function report($: Engine, what: Report): Promise<void> {
   if (!link) return
   const key = JSON.stringify([what.phase, what.id ?? null, what.detail ?? '', what.source ?? 'claude'])
   if (key === lastReport && what.preview === undefined) return
@@ -89,7 +89,7 @@ async function report($: Engine, what: Report): Promise<void> {
   if (!reply.ok && reply.status === 0) link = null
 }
 
-async function submitPrompt($: Engine, queued: QueuedPrompt): Promise<void> {
+export async function submitPrompt($: Engine, queued: QueuedPrompt): Promise<void> {
   const prompt = { ...queued, text: composePrompt(queued) }
   pending.push(prompt)
   try {
@@ -108,12 +108,15 @@ async function submitPrompt($: Engine, queued: QueuedPrompt): Promise<void> {
   }
 }
 
-/** Called about once a second: picks up what the bot has queued and keeps the two copies of the settings together. */
-export async function pump($: Engine): Promise<void> {
+/**
+ * Called about once a second: picks up what the bot has queued and keeps the two copies of the settings together.
+ * What it picks up is returned for the caller to act on (a command, or a prompt for Claude).
+ */
+export async function pump($: Engine): Promise<QueuedPrompt[]> {
   if (!link) {
     // No companion known: look for one. With none running this is one failed file read.
     link = await connect($)
-    if (!link) return
+    if (!link) return []
     await syncConfig($, link)
     // A companion that has just come up knows nothing about the session yet.
     lastModelKey = ''
@@ -125,11 +128,15 @@ export async function pump($: Engine): Promise<void> {
     // A companion from before the prompt queue has no such route.
     isOutdated = reply.status === 404
     link = null
-    return
+    return []
   }
   isOutdated = reply.data.version < MIN_RUNTIME_VERSION
-  for (const prompt of reply.data.prompts) void submitPrompt($, prompt)
-  if (reply.data.revision !== (await loadConfig($)).revision) await syncConfig($, link)
+  try {
+    if (reply.data.revision !== (await loadConfig($)).revision) await syncConfig($, link)
+  } catch {
+    // The prompts are already claimed: a failed sync is tried again next second, and must not lose them.
+  }
+  return reply.data.prompts
 }
 
 /** A turn of the main conversation began. If it is a prompt the bot sent, it is tracked as that one. */

@@ -114,6 +114,7 @@ Taken from the app itself, not imitated:
 | **Drag** the panel's far edges or corner (the ones away from the bot) | resize the panel; the reply area takes the extra room. It is saved with that bot. **Double-click** an edge to reset |
 | The **arrows** button in the panel, or double-click its top | switch between the usual size and a large view (up to 60% of the screen's height) |
 | **Ctrl+Alt+arrows** in the panel | resize it from the keyboard (right and up grow it, left and down shrink it) |
+| Type a **/command** in the panel (`/cost`, `/compact`, `/mini-bot hide`) | run it as if typed in Claude Code; what it prints comes back to the panel (see below) |
 | The **microphone** button, or **holding Space** in the empty prompt | speak a prompt (see below) |
 | The **sliders** button in the panel | customize this bot |
 | The **snip** button in the panel, or right-click > Take screenshot | snip part of the screen and ask Claude about it (below) |
@@ -123,6 +124,15 @@ Taken from the app itself, not imitated:
 The panel always sits beside the bot and never covers it or leaves the screen: if there is not room for the size you chose, the reply area is shortened (your chosen size is kept). Only the reply area changes height, so dragging an edge before there is a reply changes the width only. In Customize, **Long replies > Grow the panel** lets a long reply make the panel taller by itself (up to 60% of the screen's height, and never smaller than the size you chose), and **Chat panel > Reset to default size** puts it back. From Claude Code: `/mini-bot set panel-size 520x300` (width x reply height, in pixels), `set panel-size reset`, `set grow-replies on`.
 
 The panel shows what Claude Code is really doing: *Sending, Thinking, Working (and which tool), Done, Something went wrong*. The face and a small badge on the bot show the same. The reply text is shown only for prompts you sent from the bot; turns you start in Claude Code only show a state.
+
+### Slash commands
+
+Typing `/name args` in the panel runs that command in your Claude Code session, as if you had typed it there: Claude Code's own commands, your skills and plugins' commands, and `/mini-bot ...`. The output comes back as the reply. A command that opens a panel or dialog (or prints nothing) opens it in Claude Code, and the bot says so. A command that sends a prompt to Claude shows its answer in Claude Code, not in the bot.
+
+- Only **typed** text runs a command. Speech and prompts with attachments never do.
+- `/permissions`, `/allowed-tools`, `/model`, `/effort`, `/config`, `/hooks`, `/login`, `/logout`, `/exit` and `/quit` are refused, because the bot never changes Claude Code's permissions, model or session. Run those in Claude Code.
+- A prompt that starts with `/` but is not a command (a path, say) is not sent, because Claude Code would read it as a command too. Start it with a word.
+- Commands that open menus (`/mini-bot settings`, `/mini-bot` alone) still open their menu in Claude Code. The typed forms (`/mini-bot set opacity 70`, `/mini-bot hide`) work fully from the bot.
 
 ### Voice
 

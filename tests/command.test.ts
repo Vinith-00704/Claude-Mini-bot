@@ -90,6 +90,15 @@ const world = async ($: any, on: any, options: Options) => {
   mock.env(on, { MINI_BOT_HOME: '/mb' })
   const clock = mock.clock(on)
   on('command.register', () => ({ value: { command: 'mini-bot' } }))
+  // Claude Code's own commands, as far as the bot is concerned: a few that print, and one that only opens a panel.
+  const ran: { command: string; args: string }[] = []
+  on('command.list', () => ({
+    value: ['mini-bot', 'cost', 'compact', 'model', 'review'].map(name => ({ name, description: '', source: 'builtin' })),
+  }))
+  on('command.run', (_: any, e: any) => {
+    ran.push({ command: e.command, args: e.args })
+    return e.command === 'cost' ? { text: 'Total cost: $0.12' } : {}
+  })
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
   on('fs.read', (_: any, e: any) => {
     if (String(e.path).endsWith('plugin.json')) return { value: JSON.stringify({ name: 'mini-bot', version: options.installed ?? '0.1.0' }) }
@@ -126,11 +135,15 @@ const world = async ($: any, on: any, options: Options) => {
   requests.length = 0
   const run = async (args: string) => (await $.command.run({ command: 'mini-bot', args })).text as string
   /** One second passes: the mod asks the companion for prompts. */
-  const tick = async () => clock.advance(1000)
+  const tick = async () => {
+    await clock.advance(1000)
+    await clock.settle()
+  }
   const activity = () => requests.filter(r => r.path === '/v1/activity').map(r => r.body)
   return {
     run,
     commands,
+    ran,
     urls,
     setModel: (id: string) => (sessionModel = id),
     tick,
@@ -273,6 +286,67 @@ test('nothing is submitted when the bot has nothing to say', async ($, on) => {
   await tick()
   expect(submitted).toEqual([])
   expect(requests.filter(r => r.path === '/v1/prompts/claim').length).toBeGreaterThan(0)
+})
+
+// ---- slash commands typed into the bot ----
+
+test('a Claude Code command typed into the bot runs as a command, and its output comes back to the bot', async ($, on) => {
+  const { prompts, submitted, ran, tick, activity } = await world($, on, { running: true })
+  prompts.push({ id: 'c1', text: '/cost', source: 'text', at: 0 })
+  await tick()
+  expect(ran).toEqual([{ command: 'cost', args: '' }])
+  expect(submitted).toEqual([])
+  const last = activity().at(-1)
+  expect([last.phase, last.source, last.id]).toEqual(['completed', 'bot', 'c1'])
+  expect(last.preview).toEqual({ text: 'Total cost: $0.12', isError: false })
+})
+
+test('a command with arguments gets them, and one that prints nothing says where to look', async ($, on) => {
+  const { prompts, ran, tick, activity } = await world($, on, { running: true })
+  prompts.push({ id: 'c2', text: '/compact  keep the plan ', source: 'text', at: 0 })
+  await tick()
+  expect(ran).toEqual([{ command: 'compact', args: 'keep the plan' }])
+  expect(activity().at(-1).preview.text).toMatch(/\/compact ran\. .* in Claude Code/)
+})
+
+test('/mini-bot typed into the bot runs the mini-bot command here', async ($, on) => {
+  const { prompts, ran, submitted, tick, activity } = await world($, on, { running: true })
+  prompts.push({ id: 'c3', text: '/mini-bot hide', source: 'text', at: 0 })
+  await tick()
+  expect(ran).toEqual([])
+  expect(submitted).toEqual([])
+  expect(activity().at(-1).preview.text).toMatch(/hidden and still connected/)
+})
+
+test('a slash that names no command is not sent, since Claude Code would read it as one', async ($, on) => {
+  const { prompts, ran, submitted, tick, activity } = await world($, on, { running: true })
+  prompts.push({ id: 'c4', text: '/tmp is full, why?', source: 'text', at: 0 })
+  prompts.push({ id: 'c5', text: '/etc/hosts what is this', source: 'text', at: 0 })
+  await tick()
+  expect(ran).toEqual([])
+  expect(submitted).toEqual([])
+  expect(activity().map(a => [a.phase, a.id]).sort()).toEqual([['error', 'c4'], ['error', 'c5']])
+  expect(activity()[0].preview.text).toMatch(/Start with a word/)
+})
+
+test('commands that change what the bot promises never to touch are refused', async ($, on) => {
+  const { prompts, ran, submitted, tick, activity } = await world($, on, { running: true })
+  prompts.push({ id: 'c6', text: '/model opus', source: 'text', at: 0 })
+  await tick()
+  expect(ran).toEqual([])
+  expect(submitted).toEqual([])
+  expect(activity().at(-1).preview).toEqual({ text: expect.stringMatching(/Run it in Claude Code itself/), isError: true })
+})
+
+test('spoken words and prompts with attachments never run a command', async ($, on) => {
+  const { prompts, ran, submitted, tick, activity } = await world($, on, { running: true })
+  prompts.push({ id: 'c7', text: '/cost', source: 'voice', at: 0 })
+  prompts.push({ id: 'c8', text: '/review', source: 'text', attachments: [{ type: 'file', path: 'C:\\a.txt', kind: 'file', direct: true }], at: 0 })
+  prompts.push({ id: 'c9', text: 'what does /cost do?', source: 'voice', at: 0 })
+  await tick()
+  expect(ran).toEqual([])
+  expect(activity().filter(a => a.phase === 'error').map(a => a.id).sort()).toEqual(['c7', 'c8'])
+  expect(submitted.map(s => s.text)).toEqual(['what does /cost do?'])
 })
 
 test('activity follows the real turn, and the reply is sent only for a turn the bot started', async ($, on) => {

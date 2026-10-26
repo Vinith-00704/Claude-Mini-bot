@@ -11,6 +11,7 @@ import { connect } from './lib/client'
 import { loadConfig } from './lib/config'
 import { runCommand } from './lib/commands'
 import { startRuntime, stopRuntime, syncConfig } from './lib/lifecycle'
+import { dispatchPrompt } from './lib/slash'
 import { refreshStatus } from './lib/status'
 import type { Engine } from './lib/types'
 
@@ -43,7 +44,8 @@ async function tick($: Engine) {
   if (isTicking) return
   isTicking = true
   try {
-    await pump($)
+    // Not waited for: a command can take a while, and asking for new prompts goes on.
+    for (const prompt of await pump($)) void dispatchPrompt($, prompt).catch(() => {})
     ticks += 1
     if (ticks % STATUS_EVERY === 0) {
       await refreshStatus($)
