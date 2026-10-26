@@ -58,6 +58,7 @@ async function describeStatus($: Engine): Promise<string> {
   } else if (state) {
     lines.push(`Prompts from the floating bot: ${state.bridge.connected ? 'connected to this session' : 'not connected yet (give it a moment)'}.`)
   }
+  if (state && state.version < 3) lines.push('The companion is from before the bot could list slash commands when you type /: /mini-bot stop, then /mini-bot start.')
   return lines.join('\n')
 }
 

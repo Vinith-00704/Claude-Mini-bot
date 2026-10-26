@@ -10,6 +10,7 @@
 // reply is sent only for a turn the bot itself started, and only to the
 // companion on this computer; every other turn is reported as a state alone.
 
+import { buildCatalog } from './catalog'
 import { connect, request, type Link } from './client'
 import { loadConfig } from './config'
 import { effortLevel, friendlyModel } from './model-info'
@@ -70,6 +71,9 @@ let lastModelKey = ''
 let knownModel = ''
 let knownEffort: string | null = null
 let sessionUnsupported = false
+// The slash commands as last told to the companion, for the bot's `/` picker.
+let lastCommandsKey = ''
+let commandsUnsupported = false
 
 /** True when the companion is too old to carry prompts, so `/mini-bot status` can say so. */
 export function isRuntimeOutdated(): boolean {
@@ -121,7 +125,10 @@ export async function pump($: Engine): Promise<QueuedPrompt[]> {
     // A companion that has just come up knows nothing about the session yet.
     lastModelKey = ''
     sessionUnsupported = false
+    lastCommandsKey = ''
+    commandsUnsupported = false
     await modelCheck($)
+    await commandCheck($)
   }
   const reply = await request<ClaimReply>($, link, 'POST', '/v1/prompts/claim', {})
   if (!reply.ok) {
@@ -210,4 +217,22 @@ export async function modelCheck($: Engine): Promise<void> {
   // The session may name a model by an alias that a request resolves to a full id; the same model is not a change.
   if (knownModel !== '' && !/\d/.test(name) && knownModel.toLowerCase().startsWith(name.toLowerCase())) return
   await publishModel($, id, name === knownModel ? knownEffort : null)
+}
+
+/**
+ * Tells the companion which slash commands exist, for the bot's `/` picker, when that is not what it was last told.
+ * Commands come and go (a plugin is installed, a skill is added), so this is checked now and then, not just once.
+ */
+export async function commandCheck($: Engine): Promise<void> {
+  if (!link || commandsUnsupported) return
+  const entries = buildCatalog(await $.command.list())
+  const key = JSON.stringify(entries)
+  if (key === lastCommandsKey) return
+  lastCommandsKey = key
+  const reply = await request($, link, 'POST', '/v1/commands', { commands: entries })
+  if (reply.ok) return
+  if (reply.status === 0) link = null
+  // A companion from before this existed has no such route: say nothing more to it.
+  else if (reply.status === 404) commandsUnsupported = true
+  else lastCommandsKey = ''
 }

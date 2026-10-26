@@ -47,7 +47,7 @@ test('refuses requests without the token, with a wrong one, or from a browser', 
 test('runtime.json carries the port and token and goes away on stop', async () => {
   const info = JSON.parse(await readFile(join(dir, 'runtime.json'), 'utf8'))
   assert.equal(info.token, runtime.token)
-  assert.equal(info.version, 2)
+  assert.equal(info.version, 3)
   await runtime.stop()
   await assert.rejects(stat(join(dir, 'runtime.json')))
 })
@@ -374,4 +374,42 @@ test('screenshots older than a week are removed when the runtime starts', async 
   } finally {
     await next.stop()
   }
+})
+
+test('the slash commands are kept for the overlay, cleaned, and counted as a new revision only when they change', async () => {
+  assert.deepEqual((await api('GET', '/v1/state')).body.commands, { revision: 0, count: 0 })
+  const list = [
+    { name: 'cost', description: 'Show   the\ntotal cost', source: 'builtin' },
+    { name: 'mini-bot hide', description: 'Hide the bot', source: 'bot' },
+    { name: 'mini-bot set', description: 'Change a setting', source: 'bot', takesArgs: true },
+    { name: 'COST', description: 'a duplicate, in another case' },
+    { name: 'bad name!', description: 'not something a person can type' },
+    { name: '', description: 'nameless' },
+    { name: 'review', description: 'x'.repeat(500), source: 'nonsense' },
+  ]
+  const first = await api('POST', '/v1/commands', { commands: list })
+  assert.deepEqual(first.body.commands, { revision: 1, count: 4 })
+  const got = (await api('GET', '/v1/commands')).body
+  assert.deepEqual(got.items.map(i => i.name), ['cost', 'mini-bot hide', 'mini-bot set', 'review'])
+  assert.equal(got.items[0].description, 'Show the total cost')
+  assert.equal(got.items[2].takesArgs, true)
+  assert.equal(got.items[3].description.length, 120)
+  assert.equal(got.items[3].source, 'plugin')
+  // The same list again is not a change.
+  assert.equal((await api('POST', '/v1/commands', { commands: list })).body.commands.revision, 1)
+  assert.equal((await api('POST', '/v1/commands', { commands: [] })).body.commands.revision, 2)
+})
+
+test('the slash command list must be a list, and needs the token', async () => {
+  assert.equal((await api('POST', '/v1/commands', { commands: 'cost' })).status, 400)
+  assert.equal((await api('POST', '/v1/commands', {})).status, 400)
+  assert.equal((await api('POST', '/v1/commands', { commands: [] }, {})).status, 401)
+  assert.equal((await api('GET', '/v1/commands', undefined, {})).status, 401)
+})
+
+test('a long list of commands, as a session with many skills makes, is accepted', async () => {
+  const many = Array.from({ length: 600 }, (_, i) => ({ name: `skill-${i}`, description: 'd'.repeat(120), source: 'plugin' }))
+  const res = await api('POST', '/v1/commands', { commands: many })
+  assert.equal(res.status, 200)
+  assert.equal(res.body.commands.count, 600)
 })

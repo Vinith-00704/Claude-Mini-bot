@@ -61,6 +61,7 @@ namespace MiniBot
         readonly IconButton btnShot = new IconButton("camera");
         readonly ChipBar chips = new ChipBar();
         readonly ModelLabel modelLbl = new ModelLabel();
+        readonly CommandList picker = new CommandList();
         readonly IconButton btnSend = new IconButton("send");
         readonly TextButton btnAllow = new TextButton("Allow");
         readonly TextButton btnNotNow = new TextButton("Not now");
@@ -99,6 +100,9 @@ namespace MiniBot
         int inputLines = 1;
         int promptLineH;           // the prompt's line pitch, measured once
         bool scrollOn;
+        // The slash-command list under the prompt: open while the text is "/" and what follows matches a command.
+        bool pickerOpen, pickerDismissed;
+        int pickerRows;
         string renderedText = "";
         int contentWidth = -1, contentHeight;
         readonly Timer commitTimer = new Timer();
@@ -155,7 +159,7 @@ namespace MiniBot
             tips.SetToolTip(btnSend, "Send");
             btnSend.Primary = true;
 
-            Control[] all = { meter, title, status, notice, response, input, btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend, chips, modelLbl, btnAllow, btnNotNow, btnContinue, btnSkip };
+            Control[] all = { meter, title, status, notice, response, input, btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend, chips, modelLbl, btnAllow, btnNotNow, btnContinue, btnSkip, picker };
             foreach (var c in all) Controls.Add(c);
             btnAllow.Primary = true;
             btnContinue.Primary = true;
@@ -177,7 +181,8 @@ namespace MiniBot
             btnNotNow.Click += delegate { Raise(ConsentDeclined); };
             btnContinue.Click += delegate { FinishOnboarding(); };
             btnSkip.Click += delegate { Raise(OnboardingSkipped); };
-            input.TextChanged += delegate { if (!settingText && InputEdited != null) InputEdited(); UpdateSendEnabled(); FitInput(); };
+            picker.Picked += delegate (CommandItem item) { Choose(item, false); input.Focus(); };
+            input.TextChanged += delegate { if (!settingText && InputEdited != null) InputEdited(); UpdateSendEnabled(); pickerDismissed = false; UpdatePicker(); FitInput(); };
             input.KeyDown += OnInputKey;
             input.KeyUp += OnInputKeyUp;
             input.LostFocus += delegate { if (!(ActiveForm is NoActivateForm)) EndHold(); };
@@ -243,8 +248,80 @@ namespace MiniBot
 
         static void Raise(Action a) { if (a != null) a(); }
 
+        // ---- the slash-command list ----
+
+        /// <summary>The commands Claude Code can run, as the companion has them; typing "/" lists and narrows them.</summary>
+        public void SetCommands(IList<CommandItem> items)
+        {
+            picker.SetItems(items);
+            UpdatePicker();
+        }
+
+        /// <summary>Opens, narrows or closes the list to match the prompt: it is open while the text is a slash and a command still fits it.</summary>
+        void UpdatePicker()
+        {
+            string text = input.Text;
+            bool want = mode == Chat && !listening && !pickerDismissed && text.StartsWith("/", StringComparison.Ordinal) && text.IndexOf('\n') < 0;
+            if (want) want = picker.Filter(text.Substring(1)) > 0;
+            int rows = want ? picker.Rows : 0;
+            input.CaptureTab = want;
+            if (want == pickerOpen && rows == pickerRows)
+            {
+                if (want) picker.Invalidate();
+                return;
+            }
+            pickerOpen = want;
+            pickerRows = rows;
+            Relayout();
+        }
+
+        /// <summary>
+        /// Takes a command from the list. Completing puts its name in the prompt and waits for the rest; running (Enter)
+        /// sends it at once, unless it needs something typed after it, in which case it is completed instead.
+        /// </summary>
+        void Choose(CommandItem item, bool run)
+        {
+            if (item == null) return;
+            string full = "/" + item.Name;
+            if (run && !item.TakesArgs)
+            {
+                SetInput(full);
+                SendNow();
+            }
+            else SetInput(full + " ");
+        }
+
+        /// <summary>Keys for the open list. Returns true when the key was for it.</summary>
+        bool HandlePickerKey(KeyEventArgs e)
+        {
+            if (e.Alt || e.Control) return false;
+            switch (e.KeyCode)
+            {
+                case Keys.Down: picker.MoveSelection(1); return true;
+                case Keys.Up: picker.MoveSelection(-1); return true;
+                case Keys.PageDown: picker.MoveSelection(CommandList.MaxRows); return true;
+                case Keys.PageUp: picker.MoveSelection(-CommandList.MaxRows); return true;
+                case Keys.Tab: Choose(picker.Selected, false); return true;
+                case Keys.Enter:
+                    if (e.Shift) return false;
+                    Choose(picker.Selected, true);
+                    return true;
+                case Keys.Escape:
+                    pickerDismissed = true;   // the next Escape closes the panel as usual
+                    UpdatePicker();
+                    return true;
+            }
+            return false;
+        }
+
         void OnInputKey(object sender, KeyEventArgs e)
         {
+            if (pickerOpen && mode == Chat && !listening && HandlePickerKey(e))
+            {
+                e.SuppressKeyPress = true;
+                e.Handled = true;
+                return;
+            }
             if (e.Control && !e.Alt && e.KeyCode == Keys.V && mode == Chat && TryPasteFiles())
             {
                 e.SuppressKeyPress = true;
@@ -362,6 +439,7 @@ namespace MiniBot
             foreach (var b in new[] { btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
             chips.Colors = p; chips.BackColor = p.Bg; chips.Invalidate();
             modelLbl.Colors = p; modelLbl.BackColor = p.Bg; modelLbl.Invalidate();
+            picker.Colors = p; picker.BackColor = p.Bg; picker.Invalidate();
             foreach (var b in new[] { btnAllow, btnNotNow, btnContinue, btnSkip }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
             RenderConversation();
             Invalidate();
@@ -716,6 +794,17 @@ namespace MiniBot
             meter.Visible = chat && listening;
             meter.SetBounds(inputRect.X, inputRect.Y, inputRect.Width, inputRect.Height);
             y += fieldH + gap;
+
+            // The slash-command list sits right under the prompt, like Claude Code's own.
+            bool showPicker = chat && pickerOpen && !listening && picker.Rows > 0;
+            picker.Visible = showPicker;
+            if (showPicker)
+            {
+                int pickerH = picker.HeightFor();
+                int pickerY = y - gap + Ui.Px(4);
+                picker.SetBounds(m, pickerY, inner, pickerH);
+                y = pickerY + pickerH + gap;
+            }
 
             btnContinue.Visible = btnSkip.Visible = onboarding;
             if (onboarding)

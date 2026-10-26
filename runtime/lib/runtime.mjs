@@ -9,25 +9,29 @@ import { join, resolve, sep } from 'node:path'
 import { applyOp, normalizeConfig, sameChoices } from '../../shared/config.mjs'
 import { Activity, Voice } from './activity.mjs'
 import { check, newToken } from './auth.mjs'
+import { Commands } from './commands.mjs'
 import { Permissions } from './permissions.mjs'
 import { Prompts } from './prompts.mjs'
 import { Session } from './session.mjs'
 import { indicatorFor, isVisible } from './visibility.mjs'
 
 // 2: configuration owned here, prompt queue, activity and voice state.
-export const VERSION = 2
+// 3: the list of slash commands for the bot's `/` picker.
+export const VERSION = 3
 const MAX_BODY = 64 * 1024
+// The list of slash commands is the one long request: a session with many skills makes it so.
+const MAX_BODY_BY_ROUTE = { 'POST /v1/commands': 256 * 1024 }
 // Screenshots are kept a week, then removed when the runtime next starts.
 const SCREENSHOT_DAYS = 7
 
 const fail = (status, error) => Object.assign(new Error(error), { status })
 
-const readJson = async req => {
+const readJson = async (req, limit = MAX_BODY) => {
   let size = 0
   const chunks = []
   for await (const chunk of req) {
     size += chunk.length
-    if (size > MAX_BODY) throw fail(413, 'body too large')
+    if (size > limit) throw fail(413, 'body too large')
     chunks.push(chunk)
   }
   if (size === 0) return {}
@@ -50,6 +54,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
   const activity = new Activity({ now })
   const voice = new Voice()
   const session = new Session({ now })
+  const commands = new Commands()
   const screenshotsDir = resolve(join(dataDir, 'screenshots'))
   const isScreenshot = path => {
     const full = resolve(path)
@@ -104,6 +109,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     activity: activity.snapshot(),
     voice: voice.snapshot(),
     session: session.snapshot(),
+    commands: commands.summary(),
     bridge: { connected: prompts.isBridgeAlive, queued: prompts.size },
     paths: { screenshots: screenshotsDir },
     requests: { ...requests },
@@ -152,6 +158,12 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
       session.set(body)
       return state()
     },
+    // The Claude Code side says which slash commands exist; the overlay reads them for its picker.
+    'POST /v1/commands': body => {
+      commands.set(body.commands)
+      return state()
+    },
+    'GET /v1/commands': () => commands.snapshot(),
     'POST /v1/voice': body => {
       voice.set(body)
       return state()
@@ -185,7 +197,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
       const path = new URL(req.url ?? '/', url()).pathname
       const method = req.method ?? 'GET'
       const route = routes[`${method} ${path}`]
-      const body = method === 'GET' ? {} : await readJson(req)
+      const body = method === 'GET' ? {} : await readJson(req, MAX_BODY_BY_ROUTE[`${method} ${path}`])
       const answer = route ? route(body) : permissionRoute(method, path, body)
       if (answer === undefined) return send(404, { error: 'no such route' })
       send(200, answer)

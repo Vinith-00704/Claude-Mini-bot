@@ -8,12 +8,9 @@
 // read it as a command too.
 
 import { report, submitPrompt } from './bridge'
+import { BLOCKED } from './catalog'
 import { runCommand } from './commands'
 import type { Engine, QueuedPrompt } from './types'
-
-// Commands the bot does not run, because the floating bot promises never to change these: Claude
-// Code's permission rules, the model and effort, the sign-in, and the session itself.
-const BLOCKED = new Set(['permissions', 'allowed-tools', 'model', 'effort', 'config', 'hooks', 'login', 'logout', 'exit', 'quit'])
 
 /** `/name rest of the line`, or null when the text is not shaped like a command. */
 export function parseSlash(text: string): { name: string; args: string } | null {

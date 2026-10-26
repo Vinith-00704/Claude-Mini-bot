@@ -59,6 +59,7 @@ namespace MiniBot
         readonly List<Chip> attached = new List<Chip>();   // what goes with the next prompt: a screenshot, dropped files and folders
         DateTime hoverAt = DateTime.MinValue;             // when a drag with files was last over the bot or the panel
         int lastScreenshotRequest = -1;
+        int lastCommandsRevision = -1;   // the slash-command list the panel has; -1 is none yet
         string localError;
         DateTime localErrorUntil = DateTime.MinValue;
         bool reviewVoice;   // what was just heard is waiting for the person to read, edit and send: nothing is sent by itself
@@ -292,6 +293,10 @@ namespace MiniBot
                 bot.BeginInvoke(new Action(StartScreenshot));
             }
 
+            // The slash commands Claude Code can run, for the panel's `/` list; read again only when they change.
+            int commandsRevision = Json.Int(Json.Obj(st, "commands"), "revision", -1);
+            if (commandsRevision != lastCommandsRevision) LoadCommands(commandsRevision);
+
             int revision = Json.Int(cfg, "revision");
             if (revision != lastRevision)
             {
@@ -305,6 +310,26 @@ namespace MiniBot
                 panel.StartOnboarding(look.Name);
                 ShowPanel();
             }
+        }
+
+        void LoadCommands(int revision)
+        {
+            try
+            {
+                var reply = api.Get("/v1/commands");
+                var items = new List<CommandItem>();
+                foreach (var entry in Json.Arr(reply, "items"))
+                    items.Add(new CommandItem
+                    {
+                        Name = Json.Str(entry, "name"),
+                        Description = Json.Str(entry, "description"),
+                        Source = Json.Str(entry, "source"),
+                        TakesArgs = Json.Bool(entry, "takesArgs")
+                    });
+                panel.SetCommands(items);
+                lastCommandsRevision = revision;
+            }
+            catch (ApiException) { }   // asked again on the next refresh
         }
 
         Palette CurrentPalette()

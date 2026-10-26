@@ -149,6 +149,8 @@ namespace MiniBot
         const int WM_PAINT = 0x000F;
         string hint = "";
         public Color HintColor = Color.Gray;
+        /// <summary>While the slash-command list is open, Tab is a key for the box (it completes a name) and not a move to the next control.</summary>
+        public bool CaptureTab;
 
         public PromptBox()
         {
@@ -162,6 +164,12 @@ namespace MiniBot
         {
             get { return hint; }
             set { hint = value ?? ""; Invalidate(); }
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            if (CaptureTab && (keyData & Keys.KeyCode) == Keys.Tab && (keyData & (Keys.Control | Keys.Alt)) == 0) return true;
+            return base.IsInputKey(keyData);
         }
 
         protected override void OnTextChanged(EventArgs e)

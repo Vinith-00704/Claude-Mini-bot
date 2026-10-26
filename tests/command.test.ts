@@ -9,6 +9,8 @@ import { applyOp, normalizeConfig, sameChoices } from '../shared/config.mjs'
 type Options = {
   running: boolean
   legacy?: boolean
+  /** A companion that has the prompt queue but not the slash-command list (version 2). */
+  noCommandList?: boolean
   stored?: unknown
   unsent?: boolean
   /** The version on this computer, and the one on GitHub (null: GitHub cannot be reached). */
@@ -40,7 +42,7 @@ const world = async ($: any, on: any, options: Options) => {
   }
   const state = () => ({
     running: true,
-    version: options.legacy ? 1 : 2,
+    version: options.legacy ? 1 : options.noCommandList ? 2 : 3,
     pid: 1,
     startedAt: 0,
     config: runtimeConfig,
@@ -92,8 +94,9 @@ const world = async ($: any, on: any, options: Options) => {
   on('command.register', () => ({ value: { command: 'mini-bot' } }))
   // Claude Code's own commands, as far as the bot is concerned: a few that print, and one that only opens a panel.
   const ran: { command: string; args: string }[] = []
+  let commandNames = ['mini-bot', 'cost', 'compact', 'model', 'review']
   on('command.list', () => ({
-    value: ['mini-bot', 'cost', 'compact', 'model', 'review'].map(name => ({ name, description: '', source: 'builtin' })),
+    value: commandNames.map(name => ({ name, description: `the ${name} command`, source: name === 'mini-bot' ? 'plugin' : 'builtin' })),
   }))
   on('command.run', (_: any, e: any) => {
     ran.push({ command: e.command, args: e.args })
@@ -144,6 +147,9 @@ const world = async ($: any, on: any, options: Options) => {
     run,
     commands,
     ran,
+    setCommandNames: (names: string[]) => (commandNames = names),
+    /** What the bot was last told its `/` list is. */
+    listed: () => requests.filter(r => r.path === '/v1/commands').map(r => r.body.commands as any[]),
     urls,
     setModel: (id: string) => (sessionModel = id),
     tick,
@@ -347,6 +353,43 @@ test('spoken words and prompts with attachments never run a command', async ($, 
   expect(ran).toEqual([])
   expect(activity().filter(a => a.phase === 'error').map(a => a.id).sort()).toEqual(['c7', 'c8'])
   expect(submitted.map(s => s.text)).toEqual(['what does /cost do?'])
+})
+
+test('the bot is told which commands exist, for its / list, without the ones it refuses', async ($, on) => {
+  const { tick, listed } = await world($, on, { running: true })
+  await tick()
+  expect(listed()).toHaveLength(1)
+  const names = listed()[0]!.map(c => c.name)
+  expect(names.slice(0, 3)).toEqual(['mini-bot', 'mini-bot hide', 'mini-bot show'])
+  expect(names).toEqual(expect.arrayContaining(['cost', 'compact', 'review', 'mini-bot status']))
+  expect(names).not.toContain('model')
+  const set = listed()[0]!.find(c => c.name === 'mini-bot set')
+  expect(set).toMatchObject({ source: 'bot', takesArgs: true })
+  expect(listed()[0]!.find(c => c.name === 'cost')).toMatchObject({ description: 'the cost command', source: 'builtin' })
+})
+
+test('the list is sent again only when the commands change, and a new plugin shows up within seconds', async ($, on) => {
+  const { tick, listed, setCommandNames } = await world($, on, { running: true })
+  await tick()
+  for (let i = 0; i < 10; i++) await tick()
+  expect(listed()).toHaveLength(1)
+  setCommandNames(['mini-bot', 'cost', 'my-new-skill'])
+  for (let i = 0; i < 5; i++) await tick()
+  expect(listed()).toHaveLength(2)
+  expect(listed()[1]!.map(c => c.name)).toContain('my-new-skill')
+  expect(listed()[1]!.map(c => c.name)).not.toContain('review')
+})
+
+test('/mini-bot status says when the companion is too old to list commands', async ($, on) => {
+  const { tick, run } = await world($, on, { running: true, noCommandList: true })
+  await tick()
+  expect(await run('status')).toMatch(/before the bot could list slash commands[\s\S]*\/mini-bot stop, then \/mini-bot start/)
+})
+
+test('/mini-bot status says nothing about the list when the companion has it', async ($, on) => {
+  const { tick, run } = await world($, on, { running: true })
+  await tick()
+  expect(await run('status')).not.toMatch(/list slash commands/)
 })
 
 test('activity follows the real turn, and the reply is sent only for a turn the bot started', async ($, on) => {

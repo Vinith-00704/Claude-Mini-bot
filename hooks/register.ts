@@ -6,7 +6,7 @@
 
 import type { Register } from 'claude-code'
 
-import { modelCheck, pump, stepStarted, toolFinished, toolStarted, turnEnded, turnStarted } from './lib/bridge'
+import { commandCheck, modelCheck, pump, stepStarted, toolFinished, toolStarted, turnEnded, turnStarted } from './lib/bridge'
 import { connect } from './lib/client'
 import { loadConfig } from './lib/config'
 import { runCommand } from './lib/commands'
@@ -50,6 +50,7 @@ async function tick($: Engine) {
     if (ticks % STATUS_EVERY === 0) {
       await refreshStatus($)
       await modelCheck($)
+      await commandCheck($)
     }
   } catch {
     // Try again next second.

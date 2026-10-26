@@ -78,6 +78,8 @@ Your bots and settings stay in `%APPDATA%\ClaudeMiniBot`, and the optional speec
 | `/mini-bot` is not found | Run `claude plugin list`; it should show `mini-bot`. Then `/reload-plugins`. |
 | `/mini-bot start` says it could not start | Check that `node --version` works in a terminal, or set `MINI_BOT_NODE`. |
 | The bot does not appear the first time | The overlay is compiled on first launch; give it a few seconds. |
+| `/mini-bot update` says it is up to date but a change is missing | Updates are found by the `version` in `.claude-plugin/plugin.json`, not by commits: a push that leaves the version as it was is never offered. Raise the version, push, then update (below). |
+| Typing `/` shows no list | The running companion is from before the list: `/mini-bot stop`, then `/mini-bot start` (`/mini-bot status` says so). |
 | Prompts from the bot are refused | The bot only sends while a Claude Code session is connected. Run `/mini-bot status`; after an update run `/mini-bot stop` then `/mini-bot start`. |
 | The microphone does nothing | Windows must allow desktop apps to use it: Settings > Privacy & security > Microphone. |
 | Voice is inaccurate | Set up offline Whisper: `/mini-bot speech install` (see below). |
@@ -126,6 +128,8 @@ The panel always sits beside the bot and never covers it or leaves the screen: i
 The panel shows what Claude Code is really doing: *Sending, Thinking, Working (and which tool), Done, Something went wrong*. The face and a small badge on the bot show the same. The reply text is shown only for prompts you sent from the bot; turns you start in Claude Code only show a state.
 
 ### Slash commands
+
+Type `/` in the panel and a list of every command opens under the prompt, as in Claude Code: Claude Code's own commands, your skills, your plugins' commands, and the `/mini-bot` ones. Keep typing to narrow it (`/co` finds `/compact`, `/cost`, `/context`; `/rv` finds `/review`; it also looks in the descriptions). **Up** and **Down** move, **Tab** completes the name, **Enter** runs the highlighted command (or, for one that needs more typed after it such as `/mini-bot set`, completes it and waits), **Esc** closes the list (a second **Esc** closes the panel), and a click on a row completes it. The list follows your session: a plugin installed or a skill added shows up within a few seconds.
 
 Typing `/name args` in the panel runs that command in your Claude Code session, as if you had typed it there: Claude Code's own commands, your skills and plugins' commands, and `/mini-bot ...`. The output comes back as the reply. A command that opens a panel or dialog (or prints nothing) opens it in Claude Code, and the bot says so. A command that sends a prompt to Claude shows its answer in Claude Code, not in the bot.
 
