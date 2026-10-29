@@ -121,6 +121,7 @@ Taken from the app itself, not imitated:
 | The **sliders** button in the panel | customize this bot |
 | The **snip** button in the panel, or right-click > Take screenshot | snip part of the screen and ask Claude about it (below) |
 | **Drop** files or folders on the bot or its panel, or **Ctrl+V** files copied in Explorer | attach them to the next prompt as chips (below) |
+| **Ctrl+Alt+B**, from any program | hide the bot or bring it back (below) |
 | The tray icon | show or hide the bot, open the prompt, take a screenshot, customize, stop |
 
 The panel always sits beside the bot and never covers it or leaves the screen: if there is not room for the size you chose, the reply area is shortened (your chosen size is kept). Only the reply area changes height, so dragging an edge before there is a reply changes the width only. In Customize, **Long replies > Grow the panel** lets a long reply make the panel taller by itself (up to 60% of the screen's height, and never smaller than the size you chose), and **Chat panel > Reset to default size** puts it back. From Claude Code: `/mini-bot set panel-size 520x300` (width x reply height, in pixels), `set panel-size reset`, `set grow-replies on`.
@@ -166,6 +167,15 @@ Under the panel's header a thin line shows what your Claude Code session is runn
 - `/mini-bot set model-label full|model|off` chooses how much to show: both, the model alone, or nothing. `/mini-bot status` prints the same information.
 - Subagents' own models are not shown.
 
+### The hide/show shortcut
+
+**Ctrl+Alt+B** hides the bot or brings it back, from any program, without opening Claude Code. It does what `/mini-bot toggle` does: only the character is hidden, Claude Code stays connected, and an access indicator for the screen or microphone stays visible whether the bot is hidden or not.
+
+- `/mini-bot set hotkey ctrl+alt+j` changes it (also under `/mini-bot settings` > Hide/show shortcut). A shortcut is Ctrl, Alt or Win with a letter, a digit or F1-F12; Shift alone is refused because it would take over capital letters. `set hotkey off` turns it off and `set hotkey reset` restores Ctrl+Alt+B.
+- It is a Windows hot key: Windows tells the bot only when exactly that combination is pressed. The bot does not watch the keyboard, and the key press never reaches Claude Code.
+- Only one program can own a combination. If another program already has it, the tray icon shows a warning, `/mini-bot status` says the shortcut does not work, and the fix is to pick another with `set hotkey`.
+- It works while the companion runs; `/mini-bot stop` releases it.
+
 ### Dropping files on the bot
 
 Drag files or folders from Explorer onto the bot (or onto its open panel) and it eats them: its mouth opens as soon as the drag is over it, the file flies in, it chews twice and swallows. A shrug means the kind of file is one Claude may not open directly. A shake of the head means nothing could be taken. Ctrl+V in the prompt does the same with files copied in Explorer. Nothing about the bot's look changes the rest of the time: the mouth only exists while it is eating, and with **reduced motion** on the animation is skipped (the files are still attached).
@@ -184,7 +194,7 @@ Per bot: name, avatar (Clawd, blob, robot, cat, ghost, bunny), skin (Claude's or
 | | |
 | --- | --- |
 | `/mini-bot` | menu: Hide / Unhide, Settings, Permissions, Change Bot, Start / Stop (four options at a time) |
-| `/mini-bot hide` · `show` · `toggle` | hide or restore the character; Claude Code stays connected |
+| `/mini-bot hide` · `show` · `toggle` | hide or restore the character; Claude Code stays connected. The same as the **Ctrl+Alt+B** shortcut |
 | `/mini-bot start` · `stop` | start or stop only the companion (overlay and runtime); Claude Code itself is never stopped |
 | `/mini-bot status` | what is running, the active bot, what access is in use, which model and effort the session runs on, whether the bot is connected to this session |
 | `/mini-bot settings [list]` · `set <field> <value>` | change settings by menu or by typing, e.g. `set opacity 70`, `set skin ocean`, `set accent pink` |

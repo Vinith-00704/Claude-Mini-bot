@@ -7,6 +7,7 @@ export declare const TONES: readonly ['neutral', 'cheerful', 'calm', 'playful']
 export declare const ANCHORS: readonly ['bottom-right', 'bottom-left', 'top-right', 'top-left']
 export declare const STARTUP_MODES: readonly ['manual', 'restore', 'always']
 export declare const MODEL_LABELS: readonly ['full', 'model', 'off']
+export declare const DEFAULT_HOTKEY: 'Ctrl+Alt+B'
 export declare const ACCENTS: readonly ['claude', 'blue', 'green', 'pink', 'orange', 'purple']
 export declare const CONFIG_VERSION: 2
 export declare const THEMES: readonly ['dark', 'light']
@@ -56,6 +57,8 @@ export type Config = {
   notifications: { enabled: boolean; onTurnComplete: boolean; onAccessChange: boolean }
   startup: { mode: StartupMode; stopWithSession: boolean }
   display: { modelLabel: ModelLabel }
+  /** The shortcut that hides and shows the bot from any program, written like "Ctrl+Alt+M", or "off". */
+  hotkey: { toggle: string }
   wasRunning: boolean
 }
 
@@ -74,6 +77,7 @@ export type SettingsPatch = {
   notifications?: Partial<Config['notifications']>
   startup?: Partial<Config['startup']>
   display?: Partial<Config['display']>
+  hotkey?: Partial<Config['hotkey']>
   onboarded?: boolean
   visible?: boolean
 }
@@ -94,6 +98,8 @@ export declare function defaultProfile(id?: string, name?: string): Profile
 export declare function defaultConfig(): Config
 export declare function normalizeProfile(raw: unknown, index?: number, legacyPosition?: unknown): Profile
 export declare function normalizeConfig(raw: unknown): Config
+/** A shortcut in its one spelling ("Ctrl+Alt+M"), 'off', or null when it cannot be used. */
+export declare function parseHotkey(raw: unknown): string | null
 export declare function sameChoices(a: Config, b: Config): boolean
 export declare function activeProfile(config: Config): Profile
 export declare function findProfile(config: Config, query: string): Profile | undefined

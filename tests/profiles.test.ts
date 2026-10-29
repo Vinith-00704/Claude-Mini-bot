@@ -11,6 +11,7 @@ import {
   type Result,
 } from '../hooks/lib/profiles'
 import { tokenize } from '../hooks/lib/commands'
+import { parseHotkey } from '../shared/config.mjs'
 
 const ok = (result: Result) => {
   if ('error' in result) throw new Error(result.error)
@@ -199,4 +200,33 @@ test('a bot that still has the old factory look takes the new default; a customi
   // Already at the new version: nothing is rewritten.
   const again = normalizeConfig(migrated)
   expect(again.profiles.map(p => p.avatar)).toEqual(['clawd', 'ghost', 'blob'])
+})
+
+test('a shortcut is written one way, and an unsafe or unknown one is refused', async () => {
+  expect(parseHotkey('ctrl + alt + m')).toBe('Ctrl+Alt+M')
+  expect(parseHotkey('Alt+Control+f9')).toBe('Ctrl+Alt+F9')
+  expect(parseHotkey('windows+shift+7')).toBe('Shift+Win+7')
+  expect(parseHotkey('OFF')).toBe('off')
+  expect(parseHotkey('shift+a')).toBeNull()      // Shift alone would take over capital letters everywhere
+  expect(parseHotkey('m')).toBeNull()
+  expect(parseHotkey('ctrl+alt')).toBeNull()
+  expect(parseHotkey('ctrl+alt+f13')).toBeNull()
+  expect(parseHotkey('ctrl+hyper+m')).toBeNull()
+  expect(parseHotkey('ctrl+alt+mm')).toBeNull()
+})
+
+test('the shortcut field changes only the shortcut, resets, and turns off', async () => {
+  const field = findField('hotkey')!
+  const config = defaultConfig()
+  expect(field.show(config, config.profiles[0]!)).toBe('Ctrl+Alt+B')
+  const changed = field.apply(config, config.activeProfileId, 'ctrl+alt+h')
+  expect(changed).toMatchObject({ config: { hotkey: { toggle: 'Ctrl+Alt+H' } } })
+  if ('error' in changed) throw new Error(changed.error)
+  expect(changed.config.profiles).toEqual(config.profiles)
+  expect(field.apply(changed.config, 'default', 'off')).toMatchObject({ config: { hotkey: { toggle: 'off' } } })
+  expect(field.apply(changed.config, 'default', 'reset')).toMatchObject({ config: { hotkey: { toggle: 'Ctrl+Alt+B' } } })
+  expect(field.apply(config, 'default', 'shift+a')).toMatchObject({ error: expect.stringContaining('Ctrl, Alt or Win') })
+  // A stored value nobody can use falls back to the default instead of leaving the bot without a shortcut by accident.
+  expect(normalizeConfig({ hotkey: { toggle: 'banana' } }).hotkey.toggle).toBe('Ctrl+Alt+B')
+  expect(normalizeConfig({ hotkey: { toggle: 'off' } }).hotkey.toggle).toBe('off')
 })

@@ -21,6 +21,8 @@ export const ANCHORS = ['bottom-right', 'bottom-left', 'top-right', 'top-left']
 export const STARTUP_MODES = ['manual', 'restore', 'always']
 // The label of the model and effort the session runs on, in the panel: both, the model alone, or nothing.
 export const MODEL_LABELS = ['full', 'model', 'off']
+// The keyboard shortcut that hides and shows the bot from any program.
+export const DEFAULT_HOTKEY = 'Ctrl+Alt+B'
 // 'claude' is Claude Code's own accent, the colour of its spinner and prompt marks.
 export const ACCENTS = ['claude', 'blue', 'green', 'pink', 'orange', 'purple']
 export const THEMES = ['dark', 'light']
@@ -61,6 +63,7 @@ export const defaultConfig = () => ({
   notifications: { enabled: true, onTurnComplete: false, onAccessChange: true },
   startup: { mode: 'restore', stopWithSession: false },
   display: { modelLabel: 'full' },
+  hotkey: { toggle: DEFAULT_HOTKEY },
   // Whether the companion was running when the person last started or stopped it.
   wasRunning: false,
 })
@@ -71,6 +74,29 @@ const bool = (value, fallback) => (typeof value === 'boolean' ? value : fallback
 const num = (value, min, max, fallback) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback
 const text = (value, max, fallback) => (typeof value === 'string' ? value.slice(0, max) : fallback)
+
+const MODIFIER_NAMES = { ctrl: 'Ctrl', control: 'Ctrl', alt: 'Alt', option: 'Alt', shift: 'Shift', win: 'Win', windows: 'Win', super: 'Win', meta: 'Win' }
+const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift', 'Win']
+
+/**
+ * A shortcut as written ("ctrl + alt + m") in its one spelling ("Ctrl+Alt+M"), 'off' for none, or null when it
+ * cannot be used. It needs a letter, a digit or F1-F12, and Ctrl, Alt or Win with it: Shift alone would
+ * take over capital letters in every program.
+ */
+export const parseHotkey = raw => {
+  const word = String(raw ?? '').trim().toLowerCase()
+  if (word === 'off' || word === 'none' || word === 'disabled') return 'off'
+  const parts = word.split('+').map(part => part.trim())
+  const key = parts.pop() ?? ''
+  if (!/^([a-z0-9]|f([1-9]|1[0-2]))$/.test(key)) return null
+  const modifiers = new Set()
+  for (const part of parts) {
+    if (!(part in MODIFIER_NAMES)) return null
+    modifiers.add(MODIFIER_NAMES[part])
+  }
+  if (!modifiers.has('Ctrl') && !modifiers.has('Alt') && !modifiers.has('Win')) return null
+  return [...MODIFIER_ORDER.filter(m => modifiers.has(m)), key.toUpperCase()].join('+')
+}
 
 const normalizePosition = raw => {
   const p = rec(raw)
@@ -144,6 +170,7 @@ export const normalizeConfig = raw => {
   const notifications = rec(c.notifications)
   const startup = rec(c.startup)
   const display = rec(c.display)
+  const hotkey = rec(c.hotkey)
   return {
     version: CONFIG_VERSION,
     revision: num(c.revision, 0, Number.MAX_SAFE_INTEGER, 0),
@@ -166,6 +193,7 @@ export const normalizeConfig = raw => {
       stopWithSession: bool(startup.stopWithSession, base.startup.stopWithSession),
     },
     display: { modelLabel: pick(display.modelLabel, MODEL_LABELS, base.display.modelLabel) },
+    hotkey: { toggle: parseHotkey(hotkey.toggle) ?? base.hotkey.toggle },
     wasRunning: bool(c.wasRunning, base.wasRunning),
   }
 }
@@ -320,13 +348,16 @@ export const patchProfile = (config, id, patch) => {
   }
 }
 
-const SETTINGS_KEYS = ['sound', 'notifications', 'startup', 'display', 'onboarded', 'visible']
+const SETTINGS_KEYS = ['sound', 'notifications', 'startup', 'display', 'hotkey', 'onboarded', 'visible']
 
 /** Applies changes that belong to the whole companion rather than one bot. */
 export const patchSettings = (config, patch) => {
   const p = rec(patch)
   const extra = Object.keys(p).find(k => !SETTINGS_KEYS.includes(k))
   if (extra) return { error: `Unknown setting "${extra}".` }
+  if ('toggle' in rec(p.hotkey) && parseHotkey(p.hotkey.toggle) === null) {
+    return { error: 'A shortcut is Ctrl, Alt or Win with a letter, a digit or F1-F12, for example Ctrl+Alt+M. "off" turns it off.' }
+  }
   const merged = {
     ...config,
     ...('onboarded' in p ? { onboarded: p.onboarded } : {}),
@@ -335,6 +366,7 @@ export const patchSettings = (config, patch) => {
     notifications: { ...config.notifications, ...rec(p.notifications) },
     startup: { ...config.startup, ...rec(p.startup) },
     display: { ...config.display, ...rec(p.display) },
+    hotkey: { ...config.hotkey, ...rec(p.hotkey) },
   }
   return { config: normalizeConfig(merged), message: 'Settings updated.' }
 }

@@ -52,6 +52,16 @@ async function describeStatus($: Engine): Promise<string> {
     `Mini Bot is ${state ? 'running' : 'stopped'} and ${shown ? 'visible' : 'hidden'}. Active bot: ${profile.name} (${profile.avatar}, ${profile.appearance.skin}).`,
     ...describeAccess(state),
   ]
+  if (config.hotkey.toggle !== 'off') {
+    // A companion started before the shortcut existed does not have it until it restarts.
+    lines.push(
+      state && !state.config.hotkey
+        ? `Shortcut ${config.hotkey.toggle} works after /mini-bot stop and /mini-bot start.`
+        : state?.hotkey?.ok === false
+          ? `Hide/show shortcut ${config.hotkey.toggle} does not work: another program already uses it. Pick another with /mini-bot set hotkey ctrl+alt+j.`
+          : `Hide/show shortcut: ${config.hotkey.toggle} (/mini-bot set hotkey changes it).`,
+    )
+  }
   if (state?.session) lines.push('Session model: ' + state.session.name + (state.session.effort ? ', effort ' + state.session.effort : '') + '.')
   if (state && (state.version < MIN_RUNTIME_VERSION || isRuntimeOutdated())) {
     lines.push('The companion is an older version and cannot carry prompts from the floating bot: /mini-bot stop, then /mini-bot start.')

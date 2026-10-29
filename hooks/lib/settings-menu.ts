@@ -15,8 +15,9 @@ export async function editField($: Engine, field: Field, profileId: string): Pro
   let raw: string | undefined
 
   if (field.kind === 'text') {
-    const extra = field.id === 'notes' ? 'Clear notes' : field.id === 'panel-size' ? 'Reset to default' : 'Cancel'
-    const answer = await ask($, `${field.label} (now: ${now}). Type the new value under "Other".`, ['Keep current', extra], field.label)
+    const extra = field.id === 'notes' ? 'Clear notes' : field.id === 'panel-size' || field.id === 'hotkey' ? 'Reset to default' : 'Cancel'
+    const hint = field.id === 'hotkey' ? ' Type a shortcut like Ctrl+Alt+H, or "off", under "Other".' : ' Type the new value under "Other".'
+    const answer = await ask($, `${field.label} (now: ${now}).${hint}`, ['Keep current', extra], field.label)
     if (answer === undefined || answer === 'Keep current' || (answer === 'Cancel' && field.id !== 'notes')) return
     raw = answer === 'Clear notes' ? '' : answer === 'Reset to default' ? 'reset' : answer
   } else {

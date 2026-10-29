@@ -35,6 +35,7 @@ const world = async ($: any, on: any, options: Options) => {
   )
   let indicator: any = { visible: false, kinds: [] }
   let session: any = null
+  let hotkeyReport: any = null
 
   const setConfig = (next: unknown) => {
     const normalized: any = normalizeConfig(next)
@@ -52,6 +53,7 @@ const world = async ($: any, on: any, options: Options) => {
     activity: { phase: 'idle', id: null, detail: '', source: 'claude' },
     voice: { state: 'idle', error: null, heard: null },
     session,
+    hotkey: hotkeyReport && hotkeyReport.combo === runtimeConfig.hotkey.toggle ? hotkeyReport : null,
     bridge: { connected: true, queued: prompts.length },
   })
 
@@ -152,6 +154,7 @@ const world = async ($: any, on: any, options: Options) => {
     listed: () => requests.filter(r => r.path === '/v1/commands').map(r => r.body.commands as any[]),
     urls,
     setModel: (id: string) => (sessionModel = id),
+    setHotkeyReport: (report: unknown) => (hotkeyReport = report),
     tick,
     requests,
     config,
@@ -663,4 +666,30 @@ test('/mini-bot status says which model the session runs on', async ($, on) => {
   await step($, { model: 'claude-opus-5-5', effort: 'xhigh' })
   await tick()
   expect(await run('status')).toMatch(/Session model: Opus 5.5, effort xhigh./)
+})
+
+test('/mini-bot set hotkey changes the shortcut, tells the companion, and shows in status', async ($, on) => {
+  const { run, requests, config } = await world($, on, { running: true })
+  expect(await run('status')).toMatch(/Hide\/show shortcut: Ctrl\+Alt\+B/)
+  expect(await run('set hotkey shift+a')).toMatch(/Ctrl, Alt or Win/)
+  expect(await run('set hotkey ctrl+alt+h')).toMatch(/now Ctrl\+Alt\+H/)
+  expect(requests.filter(r => r.path === '/v1/config').at(-1)?.body.hotkey).toEqual({ toggle: 'Ctrl+Alt+H' })
+  expect(config().hotkey.toggle).toBe('Ctrl+Alt+H')
+  expect(await run('status')).toMatch(/Hide\/show shortcut: Ctrl\+Alt\+H/)
+  expect(await run('set hotkey off')).toMatch(/now off/)
+  expect(await run('status')).not.toMatch(/shortcut/i)
+})
+
+test('/mini-bot status says so when Windows would not give the bot its shortcut', async ($, on) => {
+  const { run, tick, setHotkeyReport } = await world($, on, { running: true })
+  await tick()
+  setHotkeyReport({ combo: 'Ctrl+Alt+B', ok: false })
+  expect(await run('status')).toMatch(/shortcut Ctrl\+Alt\+B does not work: another program already uses it/)
+  // A report about a shortcut that has since been changed says nothing about the new one.
+  await run('set hotkey ctrl+alt+j')
+  const after = await run('status')
+  expect(after).toMatch(/Hide\/show shortcut: Ctrl\+Alt\+J/)
+  expect(after).not.toMatch(/does not work/)
+  setHotkeyReport({ combo: 'Ctrl+Alt+J', ok: true })
+  expect(await run('status')).toMatch(/Hide\/show shortcut: Ctrl\+Alt\+J/)
 })

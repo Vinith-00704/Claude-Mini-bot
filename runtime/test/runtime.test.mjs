@@ -413,3 +413,20 @@ test('a long list of commands, as a session with many skills makes, is accepted'
   assert.equal(res.status, 200)
   assert.equal(res.body.commands.count, 600)
 })
+
+test('the overlay reports whether it got the hide/show shortcut, and an old report is not mistaken for the new shortcut', async () => {
+  assert.equal((await api('GET', '/v1/state')).body.hotkey, null)
+  assert.equal((await api('GET', '/v1/state')).body.config.hotkey.toggle, 'Ctrl+Alt+B')
+  const refused = await api('POST', '/v1/overlay/hotkey', { combo: 'Ctrl+Alt+B', ok: false })
+  assert.deepEqual(refused.body.hotkey, { combo: 'Ctrl+Alt+B', ok: false })
+  // The person picks another shortcut: the refusal was about the old one.
+  const changed = await api('POST', '/v1/config/apply', { op: 'settings', patch: { hotkey: { toggle: 'ctrl+alt+j' } } })
+  assert.equal(changed.body.config.hotkey.toggle, 'Ctrl+Alt+J')
+  assert.equal(changed.body.hotkey, null)
+  assert.deepEqual((await api('POST', '/v1/overlay/hotkey', { combo: 'Ctrl+Alt+J', ok: true })).body.hotkey, { combo: 'Ctrl+Alt+J', ok: true })
+  // A shortcut nobody can use is refused, and so is a malformed report.
+  assert.equal((await api('POST', '/v1/config/apply', { op: 'settings', patch: { hotkey: { toggle: 'shift+a' } } })).status, 400)
+  assert.equal((await api('POST', '/v1/overlay/hotkey', { combo: 5, ok: true })).status, 400)
+  assert.equal((await api('POST', '/v1/overlay/hotkey', { combo: 'x'.repeat(41), ok: true })).status, 400)
+  assert.equal((await api('POST', '/v1/overlay/hotkey', { combo: 'Ctrl+Alt+J', ok: true }, {})).status, 401)
+})

@@ -43,6 +43,8 @@ namespace MiniBot
         NoActivateForm badge;
         Label badgeLabel;
         NotifyIcon tray;
+        Hotkey hotkey;
+        string hotkeyWanted;   // the shortcut last tried, so a refused one is reported once and not on every refresh
         Dictation dict;
         Dictionary<string, object> st = new Dictionary<string, object>();
         Look look = new Look();
@@ -80,6 +82,8 @@ namespace MiniBot
             panel = new PanelWindow();
             BuildBadge();
             BuildTray();
+            hotkey = new Hotkey();
+            hotkey.Pressed += delegate { SetVisible(!Json.Bool(Json.Obj(st, "config"), "visible", true)); };
             WireEvents();
 
             poll.Interval = 400;
@@ -221,9 +225,29 @@ namespace MiniBot
                 + "|" + Json.Str(Json.Obj(p, "appearance"), "size") + "|" + Screen.PrimaryScreen.WorkingArea;
         }
 
+        /// <summary>Keeps the hide/show shortcut as the configuration says. A shortcut Windows refuses is reported once.</summary>
+        void ApplyHotkey(Dictionary<string, object> cfg)
+        {
+            string wanted = Json.Str(Json.Obj(cfg, "hotkey"), "toggle", "");
+            if (wanted == hotkeyWanted) return;
+            hotkeyWanted = wanted;
+            bool on = wanted.Length > 0 && wanted != "off";
+            bool ok = hotkey.Set(wanted);
+            // Said to the runtime so that /mini-bot status can tell the person when the shortcut is not theirs to use.
+            if (wanted.Length > 0)
+            {
+                try { api.Post("/v1/overlay/hotkey", new Dictionary<string, object> { { "combo", wanted }, { "ok", ok } }); }
+                catch (ApiException) { }
+            }
+            tray.Text = on && ok ? "Claude Mini Bot (" + wanted + " hides or shows)" : "Claude Mini Bot";
+            if (on && !ok)
+                tray.ShowBalloonTip(8000, "Claude Mini Bot", wanted + " is used by another program, so it cannot hide or show the bot. Pick another with /mini-bot set hotkey.", ToolTipIcon.Warning);
+        }
+
         void Apply()
         {
             var cfg = Json.Obj(st, "config");
+            ApplyHotkey(cfg);
             var profile = ActiveProfile();
             look = LookOf(profile);
             var appearance = Json.Obj(profile, "appearance");
@@ -964,6 +988,7 @@ namespace MiniBot
         {
             if (dict != null) { dict.Cancel(); dict.Dispose(); }
             EndCapture();
+            if (hotkey != null) hotkey.Dispose();
             if (tray != null) { tray.Visible = false; tray.Dispose(); }
         }
     }

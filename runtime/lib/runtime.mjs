@@ -72,6 +72,8 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
   const prompts = new Prompts({ now, checkImage: isScreenshot, checkPath: kindOfPath })
   // Things asked for from Claude Code that the overlay carries out (taking a screenshot).
   const requests = { screenshot: 0 }
+  // Whether Windows gave the overlay the hide/show shortcut ({ combo, ok }); another program may already own it.
+  let hotkeyReport = null
   const startedAt = now()
   const infoFile = join(dataDir, 'runtime.json')
   const cacheFile = join(dataDir, 'runtime-state.json')
@@ -109,6 +111,8 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     activity: activity.snapshot(),
     voice: voice.snapshot(),
     session: session.snapshot(),
+    // Only a report about the shortcut now chosen counts; one about a shortcut since changed is old news.
+    hotkey: hotkeyReport && hotkeyReport.combo === config.hotkey.toggle ? { ...hotkeyReport } : null,
     commands: commands.summary(),
     bridge: { connected: prompts.isBridgeAlive, queued: prompts.size },
     paths: { screenshots: screenshotsDir },
@@ -151,6 +155,12 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     },
     'POST /v1/activity': body => {
       activity.set(body)
+      return state()
+    },
+    // The overlay says whether the shortcut it was given is now registered.
+    'POST /v1/overlay/hotkey': body => {
+      if (typeof body.combo !== 'string' || body.combo.length > 40 || typeof body.ok !== 'boolean') throw fail(400, 'combo is text and ok is true or false')
+      hotkeyReport = { combo: body.combo, ok: body.ok }
       return state()
     },
     // The Claude Code side says which model the session runs on and at what effort. Shown, never acted on.

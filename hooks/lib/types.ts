@@ -9,10 +9,12 @@ export {
   ACCENTS,
   ANCHORS,
   AVATARS,
+  DEFAULT_HOTKEY,
   IDLE_STYLES,
   MODEL_LABELS,
   PANEL_REPLY_RANGE,
   PANEL_WIDTH_RANGE,
+  parseHotkey,
   SIZES,
   SKINS,
   SPEEDS,
@@ -67,6 +69,8 @@ export type RuntimeState = {
   voice: { state: 'idle' | 'listening'; error: string | null; heard: string | null }
   /** What the session runs on, once it has said (absent from a companion that predates it). Ages are in milliseconds. */
   session?: { model: string; name: string; effort: string | null; ageMs: number; switched: { from: string; to: string; ageMs: number } | null } | null
+  /** Whether Windows gave the overlay the hide/show shortcut now chosen; null until the overlay says (or for a companion that predates it). */
+  hotkey?: { combo: string; ok: boolean } | null
   bridge: { connected: boolean; queued: number }
 }
 

@@ -51,6 +51,12 @@ namespace MiniBot
         [DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(IntPtr hwnd);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
+
         // ---- screenshots ----
 
         /// <summary>Leaves a window out of every screen capture while it stays on the monitor (Windows 10 2004 and later).</summary>

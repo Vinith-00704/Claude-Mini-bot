@@ -11,10 +11,12 @@ import {
   ACCENTS,
   ANCHORS,
   AVATARS,
+  DEFAULT_HOTKEY,
   IDLE_STYLES,
   MODEL_LABELS,
   PANEL_REPLY_RANGE,
   PANEL_WIDTH_RANGE,
+  parseHotkey,
   SIZES,
   SKINS,
   SPEEDS,
@@ -38,6 +40,7 @@ export type GroupId =
   | 'notifications'
   | 'startup'
   | 'display'
+  | 'shortcut'
   | 'personality'
 
 export const GROUPS: { id: GroupId; label: string }[] = [
@@ -50,6 +53,7 @@ export const GROUPS: { id: GroupId; label: string }[] = [
   { id: 'notifications', label: 'Notifications' },
   { id: 'startup', label: 'Startup' },
   { id: 'display', label: 'Model label' },
+  { id: 'shortcut', label: 'Hide/show shortcut' },
   { id: 'personality', label: 'Personality' },
 ]
 
@@ -225,6 +229,22 @@ export const FIELDS: Field[] = [
   choiceField('startup', 'startup', 'Startup', STARTUP_MODES, c => c.startup.mode, { scope: 'global', patch: mode => ({ startup: { mode } }) }),
   boolField('stop-with-session', 'startup', 'Stop when Claude Code exits', c => c.startup.stopWithSession, { scope: 'global', patch: stopWithSession => ({ startup: { stopWithSession } }) }),
   choiceField('model-label', 'display', 'Model and effort label', MODEL_LABELS, c => c.display.modelLabel, { scope: 'global', patch: modelLabel => ({ display: { modelLabel } }) }),
+  {
+    id: 'hotkey',
+    group: 'shortcut',
+    label: 'Hide/show shortcut',
+    scope: 'global',
+    kind: 'text',
+    show: c => (c.hotkey.toggle === 'off' ? 'off' : c.hotkey.toggle),
+    apply: (config, profileId, raw) => {
+      const word = raw.trim().toLowerCase()
+      const toggle = word === 'reset' || word === 'default' ? DEFAULT_HOTKEY : parseHotkey(raw)
+      if (toggle === null) {
+        return { error: `The shortcut is Ctrl, Alt or Win with a letter, a digit or F1-F12, for example ${DEFAULT_HOTKEY}. "off" turns it off, "reset" restores ${DEFAULT_HOTKEY}.` }
+      }
+      return send(config, profileId, { scope: 'global', patch: () => ({ hotkey: { toggle } }) }, toggle)
+    },
+  },
   choiceField('tone', 'personality', 'Tone', TONES, (_c, p) => p.personality.tone, { scope: 'profile', patch: tone => ({ personality: { tone } }) }),
   {
     id: 'notes',
