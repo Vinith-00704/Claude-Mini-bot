@@ -5,7 +5,7 @@
     {
       "name": "mini-bot",
       "source": "./",
-      "description": "A floating Windows companion for Claude Code: click it to type or speak a prompt, snip the screen, and manage it with /mini-bot."
+      "description": "A floating Windows companion for Claude Code: click it to type or speak a prompt, snip the screen, let Claude use your mouse and keyboard for a task you allow, and manage it with /mini-bot."
     }
   ]
 }

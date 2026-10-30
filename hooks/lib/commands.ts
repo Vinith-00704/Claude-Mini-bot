@@ -5,6 +5,7 @@
 import { botMenu, createBot } from './bot-menu'
 import { isRuntimeOutdated } from './bridge'
 import { connect, getState, request } from './client'
+import { controlLog, stopControl } from './computer'
 import { loadConfig } from './config'
 import { commit, startRuntime, stopRuntime } from './lifecycle'
 import { mainMenu } from './menu'
@@ -36,6 +37,8 @@ const HELP = `Mini Bot: your floating character. Claude Code stays the intellige
   /mini-bot screenshot              snip part of the screen and ask Claude about it
   /mini-bot speech [install [small]]  check, or set up, accurate offline speech recognition
   /mini-bot update                  is a newer version out on GitHub, and how to install it
+  /mini-bot control stop            take the mouse and keyboard back from Claude at once
+  /mini-bot log                     what Claude did the last time it used your mouse and keyboard
   /mini-bot switch [name]           change to another bot (a list if no name)
   /mini-bot create [name]           make a new bot
   /mini-bot bot                     choose, create, rename, customize or delete bots
@@ -61,6 +64,16 @@ async function describeStatus($: Engine): Promise<string> {
           ? `Hide/show shortcut ${config.hotkey.toggle} does not work: another program already uses it. Pick another with /mini-bot set hotkey ctrl+alt+j.`
           : `Hide/show shortcut: ${config.hotkey.toggle} (/mini-bot set hotkey changes it).`,
     )
+  }
+  const control = state?.computer
+  if (control && control.status !== 'off') {
+    lines.push(
+      control.status === 'asking'
+        ? 'Computer control: Claude is asking for it in the bot.'
+        : `Computer control: ${control.status === 'paused' ? 'paused (you took over)' : 'Claude is using your mouse and keyboard'} for "${control.task}" (${control.actions} steps so far). /mini-bot control stop ends it; so does ${config.computer.stopKey}.`,
+    )
+  } else if (control?.last) {
+    lines.push(`Computer control: off. Last time: "${control.last.task}", ${control.last.actions} steps, ended because ${control.last.endedReason}. /mini-bot log has the steps.`)
   }
   if (state?.session) lines.push('Session model: ' + state.session.name + (state.session.effort ? ', effort ' + state.session.effort : '') + '.')
   if (state && (state.version < MIN_RUNTIME_VERSION || isRuntimeOutdated())) {
@@ -196,6 +209,10 @@ export async function runCommand($: Engine, input: string): Promise<string> {
       case 'update':
       case 'version':
         return updateCommand($)
+      case 'control':
+        return args[0] === 'stop' || args[0] === 'off' ? stopControl($) : 'Computer control starts when you ask Claude to do something on your PC and allow it in the bot. /mini-bot control stop ends it, /mini-bot log shows what was done.'
+      case 'log':
+        return controlLog($)
       case 'start':
         return (await startRuntime($)).message
       case 'stop':

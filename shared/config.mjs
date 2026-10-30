@@ -23,6 +23,14 @@ export const STARTUP_MODES = ['manual', 'restore', 'always']
 export const MODEL_LABELS = ['full', 'model', 'off']
 // The keyboard shortcut that hides and shows the bot from any program.
 export const DEFAULT_HOTKEY = 'Ctrl+Alt+B'
+// Computer control: how much Claude may do without asking. 'step' asks before every action, 'important'
+// only before actions that send, delete, buy, submit and the like, 'free' never within the allowed apps.
+export const CONTROL_LEVELS = ['step', 'important', 'free']
+// The key that ends computer control at once, from any program.
+export const DEFAULT_STOP_KEY = 'Ctrl+Alt+Esc'
+export const MAX_BLOCKED_APPS = 30
+export const CONTROL_ACTIONS_RANGE = [10, 1000]
+export const CONTROL_MINUTES_RANGE = [1, 120]
 // 'claude' is Claude Code's own accent, the colour of its spinner and prompt marks.
 export const ACCENTS = ['claude', 'blue', 'green', 'pink', 'orange', 'purple']
 export const THEMES = ['dark', 'light']
@@ -64,6 +72,8 @@ export const defaultConfig = () => ({
   startup: { mode: 'restore', stopWithSession: false },
   display: { modelLabel: 'full' },
   hotkey: { toggle: DEFAULT_HOTKEY },
+  // The limits of computer control. Each task still needs the person's own yes in the bot.
+  computer: { level: 'step', stopKey: DEFAULT_STOP_KEY, blockedApps: [], maxActions: 150, maxMinutes: 20 },
   // Whether the companion was running when the person last started or stopped it.
   wasRunning: false,
 })
@@ -87,15 +97,37 @@ export const parseHotkey = raw => {
   const word = String(raw ?? '').trim().toLowerCase()
   if (word === 'off' || word === 'none' || word === 'disabled') return 'off'
   const parts = word.split('+').map(part => part.trim())
-  const key = parts.pop() ?? ''
-  if (!/^([a-z0-9]|f([1-9]|1[0-2]))$/.test(key)) return null
+  const typed = parts.pop() ?? ''
+  const key = typed === 'escape' ? 'esc' : typed
+  if (!/^([a-z0-9]|f([1-9]|1[0-2])|esc|pause)$/.test(key)) return null
   const modifiers = new Set()
   for (const part of parts) {
     if (!(part in MODIFIER_NAMES)) return null
     modifiers.add(MODIFIER_NAMES[part])
   }
   if (!modifiers.has('Ctrl') && !modifiers.has('Alt') && !modifiers.has('Win')) return null
-  return [...MODIFIER_ORDER.filter(m => modifiers.has(m)), key.toUpperCase()].join('+')
+  const name = key === 'esc' || key === 'pause' ? key[0].toUpperCase() + key.slice(1) : key.toUpperCase()
+  return [...MODIFIER_ORDER.filter(m => modifiers.has(m)), name].join('+')
+}
+
+/** A program's name as the bot compares them: "EXCEL.EXE" and "excel" are the same app. Null when it is not a usable name. */
+export const appName = raw => {
+  const name = String(raw ?? '').trim().toLowerCase().replace(/\.exe$/, '')
+  return /^[a-z0-9][a-z0-9 ._-]{0,39}$/.test(name) ? name : null
+}
+
+const normalizeComputer = (raw, base) => {
+  const c = rec(raw)
+  const stopKey = parseHotkey(c.stopKey)
+  const apps = Array.isArray(c.blockedApps) ? c.blockedApps.map(appName).filter(a => a !== null) : []
+  return {
+    level: pick(c.level, CONTROL_LEVELS, base.level),
+    // The stop key cannot be turned off: it is how the person ends control without reaching the mouse.
+    stopKey: stopKey && stopKey !== 'off' ? stopKey : base.stopKey,
+    blockedApps: [...new Set(apps)].slice(0, MAX_BLOCKED_APPS),
+    maxActions: num(c.maxActions, ...CONTROL_ACTIONS_RANGE, base.maxActions),
+    maxMinutes: num(c.maxMinutes, ...CONTROL_MINUTES_RANGE, base.maxMinutes),
+  }
 }
 
 const normalizePosition = raw => {
@@ -194,6 +226,7 @@ export const normalizeConfig = raw => {
     },
     display: { modelLabel: pick(display.modelLabel, MODEL_LABELS, base.display.modelLabel) },
     hotkey: { toggle: parseHotkey(hotkey.toggle) ?? base.hotkey.toggle },
+    computer: normalizeComputer(c.computer, base.computer),
     wasRunning: bool(c.wasRunning, base.wasRunning),
   }
 }
@@ -348,7 +381,25 @@ export const patchProfile = (config, id, patch) => {
   }
 }
 
-const SETTINGS_KEYS = ['sound', 'notifications', 'startup', 'display', 'hotkey', 'onboarded', 'visible']
+const SETTINGS_KEYS = ['sound', 'notifications', 'startup', 'display', 'hotkey', 'computer', 'onboarded', 'visible']
+
+/** Why a change to the computer-control settings cannot be made, or null. */
+const checkComputer = (config, patch) => {
+  const c = rec(patch)
+  if ('level' in c && !CONTROL_LEVELS.includes(c.level)) return `The control level is one of: ${CONTROL_LEVELS.join(', ')}.`
+  if ('stopKey' in c) {
+    const key = parseHotkey(c.stopKey)
+    if (key === null || key === 'off') return 'The stop key is Ctrl, Alt or Win with a letter, a digit, F1-F12, Esc or Pause, for example Ctrl+Alt+Esc. It cannot be turned off.'
+    if (key === config.hotkey.toggle) return `${key} is already the hide/show shortcut.`
+  }
+  if ('blockedApps' in c && !(Array.isArray(c.blockedApps) && c.blockedApps.length <= MAX_BLOCKED_APPS && c.blockedApps.every(a => appName(a) !== null))) {
+    return `Blocked apps are program names such as "chrome" or "outlook", ${MAX_BLOCKED_APPS} at most.`
+  }
+  for (const [key, [min, max], label] of [['maxActions', CONTROL_ACTIONS_RANGE, 'The action limit'], ['maxMinutes', CONTROL_MINUTES_RANGE, 'The time limit']]) {
+    if (key in c && !(Number.isInteger(c[key]) && c[key] >= min && c[key] <= max)) return `${label} is a whole number from ${min} to ${max}.`
+  }
+  return null
+}
 
 /** Applies changes that belong to the whole companion rather than one bot. */
 export const patchSettings = (config, patch) => {
@@ -358,6 +409,11 @@ export const patchSettings = (config, patch) => {
   if ('toggle' in rec(p.hotkey) && parseHotkey(p.hotkey.toggle) === null) {
     return { error: 'A shortcut is Ctrl, Alt or Win with a letter, a digit or F1-F12, for example Ctrl+Alt+M. "off" turns it off.' }
   }
+  if ('toggle' in rec(p.hotkey) && parseHotkey(p.hotkey.toggle) === config.computer.stopKey) {
+    return { error: `${config.computer.stopKey} is the key that stops computer control.` }
+  }
+  const badComputer = checkComputer(config, p.computer)
+  if (badComputer) return { error: badComputer }
   const merged = {
     ...config,
     ...('onboarded' in p ? { onboarded: p.onboarded } : {}),
@@ -367,6 +423,7 @@ export const patchSettings = (config, patch) => {
     startup: { ...config.startup, ...rec(p.startup) },
     display: { ...config.display, ...rec(p.display) },
     hotkey: { ...config.hotkey, ...rec(p.hotkey) },
+    computer: { ...config.computer, ...rec(p.computer) },
   }
   return { config: normalizeConfig(merged), message: 'Settings updated.' }
 }

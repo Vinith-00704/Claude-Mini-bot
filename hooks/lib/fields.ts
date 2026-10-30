@@ -10,8 +10,13 @@ import { defaultProfile } from './config'
 import {
   ACCENTS,
   ANCHORS,
+  appName,
   AVATARS,
+  CONTROL_ACTIONS_RANGE,
+  CONTROL_LEVELS,
+  CONTROL_MINUTES_RANGE,
   DEFAULT_HOTKEY,
+  DEFAULT_STOP_KEY,
   IDLE_STYLES,
   MODEL_LABELS,
   PANEL_REPLY_RANGE,
@@ -41,6 +46,7 @@ export type GroupId =
   | 'startup'
   | 'display'
   | 'shortcut'
+  | 'computer'
   | 'personality'
 
 export const GROUPS: { id: GroupId; label: string }[] = [
@@ -54,6 +60,7 @@ export const GROUPS: { id: GroupId; label: string }[] = [
   { id: 'startup', label: 'Startup' },
   { id: 'display', label: 'Model label' },
   { id: 'shortcut', label: 'Hide/show shortcut' },
+  { id: 'computer', label: 'Computer control' },
   { id: 'personality', label: 'Personality' },
 ]
 
@@ -243,6 +250,50 @@ export const FIELDS: Field[] = [
         return { error: `The shortcut is Ctrl, Alt or Win with a letter, a digit or F1-F12, for example ${DEFAULT_HOTKEY}. "off" turns it off, "reset" restores ${DEFAULT_HOTKEY}.` }
       }
       return send(config, profileId, { scope: 'global', patch: () => ({ hotkey: { toggle } }) }, toggle)
+    },
+  },
+  choiceField('computer-level', 'computer', 'What Claude may do without asking', CONTROL_LEVELS, c => c.computer.level, { scope: 'global', patch: level => ({ computer: { level } }) }),
+  {
+    id: 'computer-stop-key',
+    group: 'computer',
+    label: 'Key that stops computer control',
+    scope: 'global',
+    kind: 'text',
+    show: c => c.computer.stopKey,
+    apply: (config, profileId, raw) => {
+      const word = raw.trim().toLowerCase()
+      const stopKey = word === 'reset' || word === 'default' ? DEFAULT_STOP_KEY : raw.trim()
+      return send(config, profileId, { scope: 'global', patch: () => ({ computer: { stopKey } }) }, stopKey)
+    },
+  },
+  {
+    id: 'computer-blocked-apps',
+    group: 'computer',
+    label: 'Apps Claude may never control',
+    scope: 'global',
+    kind: 'text',
+    show: c => (c.computer.blockedApps.length ? c.computer.blockedApps.join(', ') : '(only the ones always blocked)'),
+    apply: (config, profileId, raw) => {
+      const word = raw.trim().toLowerCase()
+      const names = word === '' || word === 'none' || word === 'reset' ? [] : raw.split(',').map(a => a.trim()).filter(Boolean)
+      const bad = names.find(n => appName(n) === null)
+      if (bad !== undefined) return { error: `"${bad}" is not a program name. Give names such as outlook, chrome, msedge, separated by commas, or "none".` }
+      return send(config, profileId, { scope: 'global', patch: () => ({ computer: { blockedApps: names.map(n => appName(n)!) } }) }, names)
+    },
+  },
+  {
+    id: 'computer-limits',
+    group: 'computer',
+    label: 'Steps and minutes before Claude must ask to go on',
+    scope: 'global',
+    kind: 'text',
+    show: c => `${c.computer.maxActions} steps, ${c.computer.maxMinutes} minutes`,
+    apply: (config, profileId, raw) => {
+      const match = /^(\d{1,4})\s*(?:steps?)?\s*[, ]\s*(\d{1,3})\s*(?:min(?:utes?)?)?$/i.exec(raw.trim())
+      if (!match) {
+        return { error: `Give steps and minutes, for example "150 20" (steps ${CONTROL_ACTIONS_RANGE.join('-')}, minutes ${CONTROL_MINUTES_RANGE.join('-')}).` }
+      }
+      return send(config, profileId, { scope: 'global', patch: () => ({ computer: { maxActions: Number(match[1]), maxMinutes: Number(match[2]) } }) }, raw)
     },
   },
   choiceField('tone', 'personality', 'Tone', TONES, (_c, p) => p.personality.tone, { scope: 'profile', patch: tone => ({ personality: { tone } }) }),

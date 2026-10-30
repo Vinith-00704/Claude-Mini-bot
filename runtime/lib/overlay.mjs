@@ -23,12 +23,12 @@ export const windowsOverlay = () => {
   let child = null
   return {
     name: 'winforms',
-    start({ url, token }) {
+    start({ url, token, overlayKey }) {
       if (child) return
       child = spawn(
         'powershell.exe',
         ['-NoProfile', '-NonInteractive', '-STA', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT],
-        { env: { ...process.env, MINI_BOT_URL: url, MINI_BOT_TOKEN: token }, stdio: 'ignore', windowsHide: true },
+        { env: { ...process.env, MINI_BOT_URL: url, MINI_BOT_TOKEN: token, MINI_BOT_OVERLAY_KEY: overlayKey }, stdio: 'ignore', windowsHide: true },
       )
       child.on('exit', () => {
         child = null

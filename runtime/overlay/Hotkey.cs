@@ -9,15 +9,20 @@ namespace MiniBot
 {
     class Hotkey : NativeWindow, IDisposable
     {
-        const int WM_HOTKEY = 0x0312, HotkeyId = 0x4D42;
+        const int WM_HOTKEY = 0x0312;
         const uint MOD_ALT = 1, MOD_CONTROL = 2, MOD_SHIFT = 4, MOD_WIN = 8, MOD_NOREPEAT = 0x4000;
         static readonly IntPtr MessageOnly = new IntPtr(-3);
 
         public event Action Pressed;
+        readonly int hotkeyId;
         bool registered;
 
-        public Hotkey()
+        public Hotkey() : this(0x4D42) { }
+
+        /// <summary>A shortcut with its own id, so one program can hold several.</summary>
+        public Hotkey(int id)
         {
+            hotkeyId = id;
             // A window that is never shown: it exists to receive the hot key message.
             CreateHandle(new CreateParams { Parent = MessageOnly });
         }
@@ -31,7 +36,7 @@ namespace MiniBot
             uint modifiers;
             uint key;
             if (!Parse(combo, out modifiers, out key)) return false;
-            registered = Native.RegisterHotKey(Handle, HotkeyId, modifiers | MOD_NOREPEAT, key);
+            registered = Native.RegisterHotKey(Handle, hotkeyId, modifiers | MOD_NOREPEAT, key);
             return registered;
         }
 
@@ -56,19 +61,21 @@ namespace MiniBot
             if (name.Length == 1 && ((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= '0' && name[0] <= '9'))) { key = name[0]; return true; }
             int n;
             if (name.Length >= 2 && name[0] == 'F' && int.TryParse(name.Substring(1), out n) && n >= 1 && n <= 12) { key = (uint)(0x70 + n - 1); return true; }
+            if (name == "ESC") { key = 0x1B; return true; }
+            if (name == "PAUSE") { key = 0x13; return true; }
             return false;
         }
 
         void Release()
         {
             if (!registered) return;
-            Native.UnregisterHotKey(Handle, HotkeyId);
+            Native.UnregisterHotKey(Handle, hotkeyId);
             registered = false;
         }
 
         protected override void WndProc(ref Message m)
         {
-            if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == HotkeyId && Pressed != null) Pressed();
+            if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == hotkeyId && Pressed != null) Pressed();
             base.WndProc(ref m);
         }
 

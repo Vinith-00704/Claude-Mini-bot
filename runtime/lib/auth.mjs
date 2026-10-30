@@ -9,7 +9,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 
 export const newToken = () => randomBytes(32).toString('hex')
 
-const sameToken = (given, expected) => {
+export const sameToken = (given, expected) => {
   const a = Buffer.from(given)
   const b = Buffer.from(expected)
   return a.length === b.length && timingSafeEqual(a, b)

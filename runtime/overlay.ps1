@@ -7,7 +7,7 @@
 
 $ErrorActionPreference = 'Stop'
 $sources = Get-ChildItem -Path (Join-Path $PSScriptRoot 'overlay') -Filter '*.cs' | Sort-Object Name
-$references = 'System.Windows.Forms', 'System.Drawing', 'System.Web.Extensions', 'System.Net.Http', 'System.Speech'
+$references = 'System.Windows.Forms', 'System.Drawing', 'System.Web.Extensions', 'System.Net.Http', 'System.Speech', 'UIAutomationClient', 'UIAutomationTypes', 'WindowsBase'
 
 $sha = [System.Security.Cryptography.SHA1]::Create()
 $bytes = $sources | ForEach-Object { [System.IO.File]::ReadAllBytes($_.FullName) } | ForEach-Object { $_ }

@@ -9,7 +9,12 @@ export {
   ACCENTS,
   ANCHORS,
   AVATARS,
+  CONTROL_ACTIONS_RANGE,
+  CONTROL_LEVELS,
+  CONTROL_MINUTES_RANGE,
   DEFAULT_HOTKEY,
+  DEFAULT_STOP_KEY,
+  appName,
   IDLE_STYLES,
   MODEL_LABELS,
   PANEL_REPLY_RANGE,
@@ -27,6 +32,7 @@ export type {
   Anchor,
   Avatar,
   Config,
+  ControlLevel,
   IdleStyle,
   ModelLabel,
   Op,
@@ -69,6 +75,15 @@ export type RuntimeState = {
   voice: { state: 'idle' | 'listening'; error: string | null; heard: string | null }
   /** What the session runs on, once it has said (absent from a companion that predates it). Ages are in milliseconds. */
   session?: { model: string; name: string; effort: string | null; ageMs: number; switched: { from: string; to: string; ageMs: number } | null } | null
+  /** Computer control as the companion has it (absent from a companion that predates it). */
+  computer?: {
+    status: 'off' | 'asking' | 'running' | 'paused'
+    task: string | null
+    apps: string[]
+    level: string | null
+    actions: number
+    last: { task: string; apps: string[]; actions: number; endedReason: string; summary: string; endedAt: number } | null
+  }
   /** Whether Windows gave the overlay the hide/show shortcut now chosen; null until the overlay says (or for a companion that predates it). */
   hotkey?: { combo: string; ok: boolean } | null
   bridge: { connected: boolean; queued: number }

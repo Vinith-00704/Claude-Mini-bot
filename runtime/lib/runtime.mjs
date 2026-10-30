@@ -4,12 +4,13 @@
 
 import { createServer } from 'node:http'
 import { existsSync, statSync } from 'node:fs'
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { applyOp, normalizeConfig, sameChoices } from '../../shared/config.mjs'
 import { Activity, Voice } from './activity.mjs'
-import { check, newToken } from './auth.mjs'
+import { check, newToken, sameToken } from './auth.mjs'
 import { Commands } from './commands.mjs'
+import { Computer } from './computer.mjs'
 import { Permissions } from './permissions.mjs'
 import { Prompts } from './prompts.mjs'
 import { Session } from './session.mjs'
@@ -17,12 +18,16 @@ import { indicatorFor, isVisible } from './visibility.mjs'
 
 // 2: configuration owned here, prompt queue, activity and voice state.
 // 3: the list of slash commands for the bot's `/` picker.
-export const VERSION = 3
+// 4: computer control.
+export const VERSION = 4
 const MAX_BODY = 64 * 1024
 // The list of slash commands is the one long request: a session with many skills makes it so.
-const MAX_BODY_BY_ROUTE = { 'POST /v1/commands': 256 * 1024 }
-// Screenshots are kept a week, then removed when the runtime next starts.
+// So is the overlay's report of a look or a step, which carries a picture of the screen.
+const MAX_BODY_BY_ROUTE = { 'POST /v1/commands': 256 * 1024, 'POST /v1/computer/result': 12 * 1024 * 1024 }
+// Screenshots and the computer-control log are kept a week, then removed when the runtime next starts.
 const SCREENSHOT_DAYS = 7
+// The entries of the last control session kept in memory for /mini-bot log.
+const LOG_KEEP = 400
 
 const fail = (status, error) => Object.assign(new Error(error), { status })
 
@@ -50,11 +55,25 @@ const writeAtomic = async (file, text) => {
 
 export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.now }) => {
   const token = newToken()
+  // A second secret, handed only to the overlay process and never written to disk: the person's answers in the
+  // bot (allow, skip, stop, take over) need it, so nothing that can read runtime.json can answer for them.
+  const overlayKey = newToken()
   const permissions = new Permissions({ now })
   const activity = new Activity({ now })
   const voice = new Voice()
   const session = new Session({ now })
   const commands = new Commands()
+  const computerLogDir = resolve(join(dataDir, 'computer-log'))
+  let controlLog = []
+  const logControl = entry => {
+    const line = { at: new Date(now()).toISOString(), ...entry }
+    if (entry.kind === 'start') controlLog = []
+    controlLog = [...controlLog, line].slice(-LOG_KEEP)
+    const day = line.at.slice(0, 10)
+    void appendFile(join(computerLogDir, `${day}.jsonl`), JSON.stringify(line) + '\n').catch(() => {})
+  }
+  // Built below the configuration it reads, at its first use.
+  let computer = null
   const screenshotsDir = resolve(join(dataDir, 'screenshots'))
   const isScreenshot = path => {
     const full = resolve(path)
@@ -78,6 +97,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
   const infoFile = join(dataDir, 'runtime.json')
   const cacheFile = join(dataDir, 'runtime-state.json')
   let config = normalizeConfig(undefined)
+  computer = new Computer({ now, permissions, activity, config: () => config, isOverlayAttached: () => overlay.isAttached, log: logControl })
   let server = null
   let port = 0
   let isStopping = false
@@ -111,11 +131,12 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     activity: activity.snapshot(),
     voice: voice.snapshot(),
     session: session.snapshot(),
+    computer: computer.snapshot(),
     // Only a report about the shortcut now chosen counts; one about a shortcut since changed is old news.
     hotkey: hotkeyReport && hotkeyReport.combo === config.hotkey.toggle ? { ...hotkeyReport } : null,
     commands: commands.summary(),
     bridge: { connected: prompts.isBridgeAlive, queued: prompts.size },
-    paths: { screenshots: screenshotsDir },
+    paths: { screenshots: screenshotsDir, computerLog: computerLogDir },
     requests: { ...requests },
   })
 
@@ -124,6 +145,11 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     if ('error' in result) throw fail(400, result.error)
     setConfig(result.config)
     return { ...state(), message: result.message }
+  }
+
+  // The routes only the overlay may call: they carry the person's answers.
+  const fromOverlay = ctx => {
+    if (!sameToken(ctx.overlayKey, overlayKey)) throw fail(403, 'only the bot itself can answer for the person')
   }
 
   const routes = {
@@ -178,6 +204,20 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
       voice.set(body)
       return state()
     },
+    // Computer control. Claude Code's side asks and polls its tickets; the overlay claims the work and reports
+    // back; the person's answers come from the overlay alone.
+    'POST /v1/computer/start': body => ({ ticket: computer.start(body) }),
+    'POST /v1/computer/look': body => ({ ticket: computer.look(body) }),
+    'POST /v1/computer/act': body => ({ ticket: computer.act(body) }),
+    'GET /v1/computer/ticket': (_body, ctx) => computer.wait(ctx.query.get('id'), Number(ctx.query.get('wait') ?? 0)),
+    'POST /v1/computer/stop': body => computer.stop(body),
+    'GET /v1/computer/log': () => ({ entries: controlLog, folder: computerLogDir, last: computer.snapshot().last }),
+    'POST /v1/computer/jobs': (_body, ctx) => (fromOverlay(ctx), computer.claimJobs()),
+    'POST /v1/computer/result': (body, ctx) => (fromOverlay(ctx), computer.finishJob(body)),
+    'POST /v1/computer/answer': (body, ctx) => (fromOverlay(ctx), computer.answer(body), state()),
+    'POST /v1/computer/pause': (body, ctx) => (fromOverlay(ctx), computer.pause(body), state()),
+    'POST /v1/computer/resume': (_body, ctx) => (fromOverlay(ctx), computer.resume(), state()),
+    'POST /v1/computer/halt': (body, ctx) => (fromOverlay(ctx), computer.stop({ reason: typeof body.reason === 'string' ? body.reason : 'the person stopped it' }), state()),
     'POST /v1/shutdown': () => {
       setTimeout(() => void stop(), 50)
       return { ok: true }
@@ -190,8 +230,13 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     const [, kind, action] = match
     if (action === 'grant') permissions.grant(kind, body)
     else if (action === 'revoke') permissions.revoke(kind)
-    else if (action === 'capture/start') permissions.startCapture(kind)
-    else permissions.stopCapture(kind)
+    else if (action === 'capture/start') {
+      // Computer control starts only through a task the person allowed in the bot.
+      if (kind === 'computer') throw fail(403, 'computer control starts with a task the person allows in the bot')
+      permissions.startCapture(kind)
+    } else permissions.stopCapture(kind)
+    // Taking computer access away, or stopping it, ends control at once.
+    if (kind === 'computer' && action !== 'grant') computer.stop({ reason: 'computer access was turned off' })
     endVoiceIfMicStopped()
     return state()
   }
@@ -204,11 +249,13 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     try {
       const refused = check(req, { token, port })
       if (refused) return send(refused.status, { error: refused.error })
-      const path = new URL(req.url ?? '/', url()).pathname
+      const where = new URL(req.url ?? '/', url())
+      const path = where.pathname
       const method = req.method ?? 'GET'
       const route = routes[`${method} ${path}`]
       const body = method === 'GET' ? {} : await readJson(req, MAX_BODY_BY_ROUTE[`${method} ${path}`])
-      const answer = route ? route(body) : permissionRoute(method, path, body)
+      const ctx = { query: where.searchParams, overlayKey: String(req.headers['x-mini-bot-overlay'] ?? '') }
+      const answer = await (route ? route(body, ctx) : permissionRoute(method, path, body))
       if (answer === undefined) return send(404, { error: 'no such route' })
       send(200, answer)
     } catch (error) {
@@ -218,8 +265,11 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
 
   const pruneScreenshots = async () => {
     const cutoff = now() - SCREENSHOT_DAYS * 24 * 60 * 60 * 1000
-    for (const name of await readdir(screenshotsDir).catch(() => [])) {
-      const file = join(screenshotsDir, name)
+    for (const [dir, name] of [
+      ...(await readdir(screenshotsDir).catch(() => [])).map(n => [screenshotsDir, n]),
+      ...(await readdir(computerLogDir).catch(() => [])).map(n => [computerLogDir, n]),
+    ]) {
+      const file = join(dir, name)
       const info = await stat(file).catch(() => null)
       if (info && info.isFile() && info.mtimeMs < cutoff) await rm(file, { force: true })
     }
@@ -228,6 +278,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
   const start = async () => {
     await mkdir(dataDir, { recursive: true })
     await mkdir(screenshotsDir, { recursive: true })
+    await mkdir(computerLogDir, { recursive: true })
     await pruneScreenshots()
     try {
       const cached = JSON.parse(await readFile(cacheFile, 'utf8'))
@@ -240,7 +291,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     })
     port = server.address().port
     await writeAtomic(infoFile, JSON.stringify({ pid: process.pid, port, token, startedAt, version: VERSION }))
-    overlay.start({ url: url(), token })
+    overlay.start({ url: url(), token, overlayKey })
     return { port, token, url: url() }
   }
 
@@ -249,6 +300,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
   const stop = async () => {
     if (isStopping) return
     isStopping = true
+    computer.stop({ reason: 'the companion stopped' })
     permissions.revokeAll()
     voice.stop()
     overlay.stop()
@@ -258,5 +310,5 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     onExit()
   }
 
-  return { start, stop, state, permissions, prompts, activity, get token() { return token } }
+  return { start, stop, state, permissions, prompts, activity, computer, get token() { return token }, get overlayKey() { return overlayKey } }
 }

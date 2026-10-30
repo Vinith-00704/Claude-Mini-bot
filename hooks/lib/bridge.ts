@@ -80,8 +80,17 @@ export function isRuntimeOutdated(): boolean {
   return isOutdated
 }
 
+// What the bot says while Claude uses the computer-control tools.
+const CONTROL_LABELS: Record<string, string> = {
+  computer_start: 'Asking to use your PC',
+  computer_look: 'Looking at your screen',
+  computer_act: 'Using your PC',
+  computer_stop: 'Handing your PC back',
+}
+
 function shortName(tool: string): string {
-  return tool.replace(/^mcp__[^_]+(?:_[^_]+)*__/, '').slice(0, 40)
+  const name = tool.replace(/^mcp__[^_]+(?:_[^_]+)*__/, '')
+  return (tool.startsWith('mcp__mini-bot__') ? CONTROL_LABELS[name] : undefined) ?? name.slice(0, 40)
 }
 
 export async function report($: Engine, what: Report): Promise<void> {

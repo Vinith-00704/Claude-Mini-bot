@@ -15,8 +15,14 @@ export async function editField($: Engine, field: Field, profileId: string): Pro
   let raw: string | undefined
 
   if (field.kind === 'text') {
-    const extra = field.id === 'notes' ? 'Clear notes' : field.id === 'panel-size' || field.id === 'hotkey' ? 'Reset to default' : 'Cancel'
-    const hint = field.id === 'hotkey' ? ' Type a shortcut like Ctrl+Alt+H, or "off", under "Other".' : ' Type the new value under "Other".'
+    const extra = field.id === 'notes' ? 'Clear notes' : ['panel-size', 'hotkey', 'computer-stop-key'].includes(field.id) ? 'Reset to default' : 'Cancel'
+    const hints: Record<string, string> = {
+      hotkey: ' Type a shortcut like Ctrl+Alt+H, or "off", under "Other".',
+      'computer-stop-key': ' Type a key like Ctrl+Alt+Esc or Ctrl+Alt+Pause under "Other". It cannot be turned off.',
+      'computer-blocked-apps': ' Type program names separated by commas (outlook, chrome) or "none" under "Other".',
+      'computer-limits': ' Type steps and minutes, like "150 20", under "Other".',
+    }
+    const hint = hints[field.id] ?? ' Type the new value under "Other".'
     const answer = await ask($, `${field.label} (now: ${now}).${hint}`, ['Keep current', extra], field.label)
     if (answer === undefined || answer === 'Keep current' || (answer === 'Cancel' && field.id !== 'notes')) return
     raw = answer === 'Clear notes' ? '' : answer === 'Reset to default' ? 'reset' : answer

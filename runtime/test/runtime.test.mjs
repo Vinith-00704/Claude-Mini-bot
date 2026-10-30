@@ -47,7 +47,7 @@ test('refuses requests without the token, with a wrong one, or from a browser', 
 test('runtime.json carries the port and token and goes away on stop', async () => {
   const info = JSON.parse(await readFile(join(dir, 'runtime.json'), 'utf8'))
   assert.equal(info.token, runtime.token)
-  assert.equal(info.version, 3)
+  assert.equal(info.version, 4)
   await runtime.stop()
   await assert.rejects(stat(join(dir, 'runtime.json')))
 })

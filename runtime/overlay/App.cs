@@ -24,7 +24,10 @@ namespace MiniBot
             try { Application.SetCompatibleTextRenderingDefault(false); } catch (InvalidOperationException) { }
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += delegate (object s, System.Threading.ThreadExceptionEventArgs e) { App.Log(e.Exception.ToString()); };
-            var app = new App(new Api(url, token));
+            // The overlay key is for this process alone: kept in the Api, gone from the environment programs it starts would inherit.
+            string overlayKey = Environment.GetEnvironmentVariable("MINI_BOT_OVERLAY_KEY");
+            Environment.SetEnvironmentVariable("MINI_BOT_OVERLAY_KEY", null);
+            var app = new App(new Api(url, token, overlayKey));
             return app.Run();
         }
     }
@@ -44,7 +47,22 @@ namespace MiniBot
         Label badgeLabel;
         NotifyIcon tray;
         Hotkey hotkey;
-        string hotkeyWanted;   // the shortcut last tried, so a refused one is reported once and not on every refresh
+        string hotkeyWanted;
+        // Computer control: the hands, the thread that runs their jobs, the takeover watch, what the person sees, the stop key.
+        ComputerHands hands;
+        ControlWorker worker;
+        InputWatch watch;
+        ControlFrame controlFrame;
+        Hotkey stopKey;
+        string stopKeyWanted;
+        System.Threading.SynchronizationContext ui;
+        string cardId;                          // the question in the panel now ("paused" for the takeover card), or null
+        string[] cardChoices = new string[0];   // what each of its buttons answers
+        bool cardOpenedPanel;                   // the panel was opened for the card, so it closes after
+        IntPtr frontBeforeCard;                 // the window in front before the card: it gets the front back after the answer
+        bool markHeld;                          // a ring is on the spot of the step being asked about
+        DateTime watchFrom = DateTime.MinValue; // after an answer in the bot, the hand moving away is not a takeover
+        string controlStatus = "off";   // the shortcut last tried, so a refused one is reported once and not on every refresh
         Dictation dict;
         Dictionary<string, object> st = new Dictionary<string, object>();
         Look look = new Look();
@@ -84,6 +102,7 @@ namespace MiniBot
             BuildTray();
             hotkey = new Hotkey();
             hotkey.Pressed += delegate { SetVisible(!Json.Bool(Json.Obj(st, "config"), "visible", true)); };
+            BuildControl();
             WireEvents();
 
             poll.Interval = 400;
@@ -135,6 +154,7 @@ namespace MiniBot
             panel.ConsentDeclined += delegate { panel.EndConsent(); };
             panel.OnboardingContinued += FinishOnboarding;
             panel.OnboardingSkipped += delegate { FinishOnboarding(""); };
+            panel.ChoiceMade += OnChoice;
         }
 
         static Dictionary<string, object> Op(string op, params object[] pairs)
@@ -244,10 +264,169 @@ namespace MiniBot
                 tray.ShowBalloonTip(8000, "Claude Mini Bot", wanted + " is used by another program, so it cannot hide or show the bot. Pick another with /mini-bot set hotkey.", ToolTipIcon.Warning);
         }
 
+        // ---- computer control ----
+
+        void BuildControl()
+        {
+            ui = System.Threading.SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            controlFrame = new ControlFrame();
+            hands = new ComputerHands();
+            hands.Mark = delegate (Point p) { ui.Post(delegate { controlFrame.Mark(p, false); }, null); };
+            worker = new ControlWorker(api, hands);
+            watch = new InputWatch();
+            // Raised inside Windows' input hook, which must return at once: the request goes out afterwards.
+            watch.TookOver += delegate { ui.Post(delegate { TakeOver(); }, null); };
+            stopKey = new Hotkey(0x4D43);
+            stopKey.Pressed += delegate { Halt("the stop key"); };
+            Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionSwitch;
+        }
+
+        void OnSessionSwitch(object sender, Microsoft.Win32.SessionSwitchEventArgs e)
+        {
+            // Nobody is watching a locked screen: control ends.
+            if (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionLock && controlStatus != "off")
+                ui.Post(delegate { Halt("the PC was locked"); }, null);
+        }
+
+        void TakeOver()
+        {
+            try { api.Overlay("/v1/computer/pause", new Dictionary<string, object> { { "reason", "you moved the mouse or pressed a key" } }); }
+            catch (ApiException) { }
+            Refresh();
+        }
+
+        void Halt(string reason)
+        {
+            try { api.Overlay("/v1/computer/halt", new Dictionary<string, object> { { "reason", reason } }); }
+            catch (ApiException) { }
+            Refresh();
+        }
+
+        /// <summary>Keeps the frame, the stop key, the takeover watch and the question card as the runtime says.</summary>
+        void ApplyControl(Dictionary<string, object> cfg)
+        {
+            var c = Json.Obj(st, "computer");
+            string status = Json.Str(c, "status", "off");
+            controlStatus = status;
+            var q = Json.Obj(c, "question");
+            string qid = Json.Str(q, "id");
+            bool on = status != "off";
+            bool controlling = status == "running" || status == "paused";
+            string key = Json.Str(Json.Obj(cfg, "computer"), "stopKey", "Ctrl+Alt+Esc");
+
+            worker.Active = on;
+            watch.Install(controlling);
+            watch.Arm(status == "running" && qid.Length == 0 && cardId == null && DateTime.UtcNow >= watchFrom);
+
+            // The stop key is held only while there is something to stop.
+            string wantKey = on ? key : "";
+            if (wantKey != stopKeyWanted)
+            {
+                stopKeyWanted = wantKey;
+                if (!stopKey.Set(wantKey) && on)
+                    tray.ShowBalloonTip(8000, "Claude Mini Bot", key + " is used by another program, so it cannot stop computer control. Stop it from the bot or this icon, and pick another key with /mini-bot set computer-stop-key.", ToolTipIcon.Warning);
+            }
+
+            if (controlling)
+            {
+                controlFrame.Show(status == "paused", CurrentPalette().Accent);
+            }
+            else if (controlFrame.IsShown) controlFrame.Hide();
+
+            bool confirmWithPoint = qid.Length > 0 && Json.Str(q, "kind") == "confirm" && Json.Has(q, "point") && Json.Obj(q, "point").Count > 0;
+            if (confirmWithPoint)
+            {
+                var p = Json.Obj(q, "point");
+                controlFrame.Mark(new Point(Json.Int(p, "x"), Json.Int(p, "y")), true);
+                markHeld = true;
+            }
+            else if (markHeld) { controlFrame.Unmark(); markHeld = false; }
+
+            if (qid.Length > 0)
+            {
+                if (cardId != qid)
+                {
+                    var options = Json.Arr(q, "options").OfType<Dictionary<string, object>>().ToArray();
+                    int primary = Math.Max(0, Array.FindIndex(options, o => Json.Bool(o, "primary")));
+                    ShowCard(qid, Json.Str(q, "text"), options.Select(o => Json.Str(o, "label")).ToArray(), options.Select(o => Json.Str(o, "id")).ToArray(), primary);
+                }
+            }
+            else if (status == "paused")
+            {
+                if (cardId != "paused") ShowCard("paused", "You have control. Claude waits until you hand it back.", new[] { "Give control back", "Stop" }, new[] { "resume", "stop" }, 0);
+            }
+            else if (cardId != null) EndCard();
+        }
+
+        /// <summary>A question from computer control in the panel, without taking the front from the window Claude works in.</summary>
+        void ShowCard(string id, string text, string[] labels, string[] ids, int primary)
+        {
+            if (!bot.Visible)
+            {
+                // A question is always seen: the bot comes back first, and the card follows on the next refresh.
+                ui.Post(delegate { SetVisible(true); }, null);
+                return;
+            }
+            if (cardId == null)
+            {
+                IntPtr front = Win.GetForegroundWindow();
+                uint pid;
+                Native.GetWindowThreadProcessId(front, out pid);
+                frontBeforeCard = pid == (uint)Process.GetCurrentProcess().Id ? IntPtr.Zero : front;
+                cardOpenedPanel = !panel.Visible;
+            }
+            cardId = id;
+            cardChoices = ids;
+            panel.ShowChoices(text, labels, primary);
+            if (!panel.Visible)
+            {
+                panel.Relayout();
+                panel.PlaceNear(bot.Bounds, Screen.FromRectangle(bot.Bounds).WorkingArea);
+                panel.ShowQuietly = true;
+                try { panel.Show(); }
+                finally { panel.ShowQuietly = false; }
+            }
+        }
+
+        void EndCard()
+        {
+            cardId = null;
+            cardChoices = new string[0];
+            panel.EndConsent();
+            if (cardOpenedPanel && panel.Visible) HidePanel();
+            cardOpenedPanel = false;
+            // The window Claude was working in gets the front back, so the next step lands where it was meant to.
+            if (frontBeforeCard != IntPtr.Zero) Native.SetForegroundWindow(frontBeforeCard);
+            frontBeforeCard = IntPtr.Zero;
+        }
+
+        void OnChoice(int index)
+        {
+            if (cardId == null || index < 0 || index >= cardChoices.Length) return;
+            string id = cardId, choice = cardChoices[index];
+            if (id == "paused")
+            {
+                if (choice == "resume")
+                {
+                    try { api.Overlay("/v1/computer/resume", null); } catch (ApiException e) { ShowError(e.Message); }
+                }
+                else Halt("the person stopped it");
+            }
+            else
+            {
+                try { api.Overlay("/v1/computer/answer", new Dictionary<string, object> { { "id", id }, { "choice", choice } }); }
+                catch (ApiException e) { ShowError(e.Message); }
+            }
+            watchFrom = DateTime.UtcNow.AddSeconds(2);
+            EndCard();
+            Refresh();
+        }
+
         void Apply()
         {
             var cfg = Json.Obj(st, "config");
             ApplyHotkey(cfg);
+            ApplyControl(cfg);
             var profile = ActiveProfile();
             look = LookOf(profile);
             var appearance = Json.Obj(profile, "appearance");
@@ -814,6 +993,7 @@ namespace MiniBot
             change.DropDownItems.Add("New bot...", null, delegate { NewBot(); });
             menu.Items.Add(change);
             menu.Items.Add(BuildPermissionsMenu());
+            if (controlStatus != "off") menu.Items.Add("Stop computer control", null, delegate { Halt("the person stopped it"); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Stop Mini Bot", null, delegate { ConfirmStop(); });
             Native.SetForegroundWindow(bot.Handle);
@@ -901,17 +1081,34 @@ namespace MiniBot
             var indicator = Json.Obj(st, "indicator");
             if (Json.Bool(indicator, "visible"))
             {
-                var kinds = Json.Arr(indicator, "kinds").OfType<string>().Select(k => k == "computer" ? "computer control" : k);
-                badgeLabel.Text = "Mini Bot is using your " + string.Join(" and ", kinds.ToArray()) + " - click to stop";
+                var all = Json.Arr(indicator, "kinds").OfType<string>().ToList();
+                var others = all.Where(k => k != "computer").ToArray();
+                string text;
+                if (all.Contains("computer"))
+                {
+                    // Computer control says how to take over and how to stop, the two things the person needs most then.
+                    string key = Json.Str(Json.Obj(Json.Obj(st, "config"), "computer"), "stopKey", "Ctrl+Alt+Esc");
+                    text = controlStatus == "paused"
+                        ? "Paused: you have control. Click here to stop Claude using your PC"
+                        : "Claude is using your PC. Move the mouse to take over. " + key + " or click here to stop";
+                    if (others.Length > 0) text += " (and your " + string.Join(" and ", others) + ")";
+                }
+                else text = "Mini Bot is using your " + string.Join(" and ", others) + " - click to stop";
+                badgeLabel.Text = text;
+                badge.BackColor = controlStatus == "paused" ? Color.FromArgb(176, 112, 0) : Color.FromArgb(200, 30, 30);
+                badge.Width = Math.Max(Ui.Px(380), TextRenderer.MeasureText(text, badgeLabel.Font).Width + Ui.Px(40));
                 var work = Screen.PrimaryScreen.WorkingArea;
                 badge.Location = new Point(work.Left + (work.Width - badge.Width) / 2, work.Top);
                 if (!badge.Visible)
                 {
-                    // Showing the bar activates it even though it asks not to be; the prompt must keep the keyboard
-                    // (a key held down to talk would otherwise be taken for "let go").
+                    // Showing the bar activates it even though it asks not to be. The prompt must keep the keyboard
+                    // (a key held down to talk would otherwise be taken for "let go"), and so must the window Claude
+                    // is working in (its next keys would otherwise land on the bar, and be refused).
                     bool promptHadFocus = panel.Visible && panel.ContainsFocus;
+                    IntPtr front = Win.GetForegroundWindow();
                     badge.Show();
                     if (promptHadFocus) panel.FocusInput();
+                    else if (front != IntPtr.Zero && Win.GetForegroundWindow() == badge.Handle) Native.SetForegroundWindow(front);
                 }
             }
             else if (badge.Visible) badge.Hide();
@@ -923,6 +1120,8 @@ namespace MiniBot
             foreach (var kind in Json.Arr(Json.Obj(st, "indicator"), "kinds").OfType<string>())
             {
                 string k = kind;
+                // Computer control is ended as the person ending it, so the log says who stopped it.
+                if (k == "computer") { try { api.Overlay("/v1/computer/halt", new Dictionary<string, object> { { "reason", "the person stopped it" } }); } catch (ApiException) { } continue; }
                 try { api.Post("/v1/permissions/" + k + "/capture/stop", null); } catch (ApiException) { }
             }
             Refresh();
@@ -938,6 +1137,9 @@ namespace MiniBot
             menu.Items.Add("Open prompt", null, delegate { if (!bot.Visible) SetVisible(true); ShowPanel(); });
             menu.Items.Add("Take screenshot", null, delegate { bot.BeginInvoke(new Action(StartScreenshot)); });
             menu.Items.Add("Customize...", null, delegate { OpenSettings(); });
+            var stopControl = new ToolStripMenuItem("Stop computer control", null, delegate { Halt("the person stopped it"); });
+            menu.Items.Add(stopControl);
+            menu.Opening += delegate { stopControl.Enabled = controlStatus != "off"; };
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Stop Mini Bot", null, delegate { ConfirmStop(); });
             tray.ContextMenuStrip = menu;
@@ -989,6 +1191,11 @@ namespace MiniBot
             if (dict != null) { dict.Cancel(); dict.Dispose(); }
             EndCapture();
             if (hotkey != null) hotkey.Dispose();
+            Microsoft.Win32.SystemEvents.SessionSwitch -= OnSessionSwitch;
+            if (worker != null) worker.Dispose();
+            if (watch != null) watch.Dispose();
+            if (stopKey != null) stopKey.Dispose();
+            if (controlFrame != null) controlFrame.Dispose();
             if (tray != null) { tray.Visible = false; tray.Dispose(); }
         }
     }

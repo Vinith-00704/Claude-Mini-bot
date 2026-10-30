@@ -8,6 +8,11 @@ export declare const ANCHORS: readonly ['bottom-right', 'bottom-left', 'top-righ
 export declare const STARTUP_MODES: readonly ['manual', 'restore', 'always']
 export declare const MODEL_LABELS: readonly ['full', 'model', 'off']
 export declare const DEFAULT_HOTKEY: 'Ctrl+Alt+B'
+export declare const CONTROL_LEVELS: readonly ['step', 'important', 'free']
+export declare const DEFAULT_STOP_KEY: 'Ctrl+Alt+Esc'
+export declare const MAX_BLOCKED_APPS: number
+export declare const CONTROL_ACTIONS_RANGE: readonly [number, number]
+export declare const CONTROL_MINUTES_RANGE: readonly [number, number]
 export declare const ACCENTS: readonly ['claude', 'blue', 'green', 'pink', 'orange', 'purple']
 export declare const CONFIG_VERSION: 2
 export declare const THEMES: readonly ['dark', 'light']
@@ -26,6 +31,7 @@ export type Tone = (typeof TONES)[number]
 export type Anchor = (typeof ANCHORS)[number]
 export type StartupMode = (typeof STARTUP_MODES)[number]
 export type ModelLabel = (typeof MODEL_LABELS)[number]
+export type ControlLevel = (typeof CONTROL_LEVELS)[number]
 export type Accent = (typeof ACCENTS)[number]
 export type Theme = (typeof THEMES)[number]
 
@@ -59,6 +65,8 @@ export type Config = {
   display: { modelLabel: ModelLabel }
   /** The shortcut that hides and shows the bot from any program, written like "Ctrl+Alt+M", or "off". */
   hotkey: { toggle: string }
+  /** Computer control's limits. `blockedApps` are program names ("outlook"), added to the ones always blocked. */
+  computer: { level: ControlLevel; stopKey: string; blockedApps: string[]; maxActions: number; maxMinutes: number }
   wasRunning: boolean
 }
 
@@ -78,6 +86,7 @@ export type SettingsPatch = {
   startup?: Partial<Config['startup']>
   display?: Partial<Config['display']>
   hotkey?: Partial<Config['hotkey']>
+  computer?: Partial<Config['computer']>
   onboarded?: boolean
   visible?: boolean
 }
@@ -100,6 +109,8 @@ export declare function normalizeProfile(raw: unknown, index?: number, legacyPos
 export declare function normalizeConfig(raw: unknown): Config
 /** A shortcut in its one spelling ("Ctrl+Alt+M"), 'off', or null when it cannot be used. */
 export declare function parseHotkey(raw: unknown): string | null
+/** A program's name as compared ("EXCEL.EXE" is "excel"), or null when it is not a usable name. */
+export declare function appName(raw: unknown): string | null
 export declare function sameChoices(a: Config, b: Config): boolean
 export declare function activeProfile(config: Config): Profile
 export declare function findProfile(config: Config, query: string): Profile | undefined

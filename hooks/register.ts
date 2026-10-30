@@ -1,5 +1,6 @@
 // Wiring only: the command, the session start and end, the once-a-second pick-up
-// of prompts from the floating bot, and the reports of what Claude Code is doing.
+// of prompts from the floating bot, the reports of what Claude Code is doing, and
+// the computer-control tools (served in lib/computer, decided by the companion).
 // The work lives in lib/: config and profiles (what the person chose), client and
 // lifecycle (the companion), bridge (prompts and activity), visibility,
 // permissions, and the menus.
@@ -8,6 +9,7 @@ import type { Register } from 'claude-code'
 
 import { commandCheck, modelCheck, pump, stepStarted, toolFinished, toolStarted, turnEnded, turnStarted } from './lib/bridge'
 import { connect } from './lib/client'
+import { controlTool, endControl, serveControl, TOOLS } from './lib/computer'
 import { loadConfig } from './lib/config'
 import { runCommand } from './lib/commands'
 import { startRuntime, stopRuntime, syncConfig } from './lib/lifecycle'
@@ -66,6 +68,12 @@ export const register: Register = on => {
       description: 'Manage your Mini Bot: hide, settings, permissions, change bot, start or stop',
       argumentHint: '[hide|show|start|stop|status|settings|permissions|switch|create|bot|help]',
     })
+    // Claude's tools for using the mouse and keyboard. Each asks the person in the bot before anything happens.
+    for (const tool of TOOLS) {
+      try {
+        await $.tool.register({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema as unknown as Record<string, unknown> })
+      } catch {}
+    }
     void resume($)
     $.clock.every(TICK_MS, () => tick($))
 
@@ -91,6 +99,8 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     void toolStarted($, String(e.tool)).catch(() => {})
     try {
+      const control = controlTool(String(e.tool))
+      if (control) return await serveControl($, control, e as unknown as Record<string, unknown>, next.signal)
       return await next(e)
     } finally {
       void toolFinished($).catch(() => {})
@@ -99,6 +109,12 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     void turnEnded($, e).catch(() => {})
+    // Control of the mouse and keyboard never outlives the turn that asked for it: it is over before the turn is.
+    if (e.agentId === undefined) {
+      try {
+        await endControl($, 'the turn ended')
+      } catch {}
+    }
 
     return next(e)
   })
@@ -106,6 +122,9 @@ export const register: Register = on => {
   // Only the companion is stopped, and only if the person asked for that; it is
   // remembered as running, so the next session brings it back.
   on('session.end', async ($, e, next) => {
+    try {
+      await endControl($, 'the session ended')
+    } catch {}
     if (e.reason !== 'clear') {
       try {
         if ((await loadConfig($)).startup.stopWithSession) await stopRuntime($, { remember: true })

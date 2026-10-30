@@ -2,8 +2,8 @@
 // piece of Claude Code's terminal: black, a rounded border in the accent colour,
 // a monospace font, a `>` prompt, `●` before the reply, and the live status line
 // with Claude Code's spinner. It also shows the two short questions that belong to
-// the bot itself: the microphone consent (in Claude Code's permission colour) and
-// the first-run "what should I be called?".
+// the bot itself: the microphone consent and computer control's questions (in Claude
+// Code's permission colour), and the first-run "what should I be called?".
 //
 // It is a front-end only. Typing here queues a prompt for Claude Code; nothing
 // in this window talks to a model.
@@ -30,6 +30,7 @@ namespace MiniBot
         public event Action CloseRequested;
         public event Action ConsentAllowed;
         public event Action ConsentDeclined;
+        public event Action<int> ChoiceMade;               // a button of a question card: its position, 0 first
         public event Action<string> OnboardingContinued;   // the chosen name, or "" for none
         public event Action OnboardingSkipped;
         public event Action InputEdited;                   // the person typed (cancels a pending voice send)
@@ -65,6 +66,8 @@ namespace MiniBot
         readonly IconButton btnSend = new IconButton("send");
         readonly TextButton btnAllow = new TextButton("Allow");
         readonly TextButton btnNotNow = new TextButton("Not now");
+        readonly TextButton btnThird = new TextButton("");
+        string[] choices;   // the labels of the question card shown now; null while the microphone consent is shown
         readonly TextButton btnContinue = new TextButton("Continue");
         readonly TextButton btnSkip = new TextButton("Skip for now");
         readonly ToolTip tips = new ToolTip();
@@ -159,7 +162,7 @@ namespace MiniBot
             tips.SetToolTip(btnSend, "Send");
             btnSend.Primary = true;
 
-            Control[] all = { meter, title, status, notice, response, input, btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend, chips, modelLbl, btnAllow, btnNotNow, btnContinue, btnSkip, picker };
+            Control[] all = { meter, title, status, notice, response, input, btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend, chips, modelLbl, btnAllow, btnNotNow, btnThird, btnContinue, btnSkip, picker };
             foreach (var c in all) Controls.Add(c);
             btnAllow.Primary = true;
             btnContinue.Primary = true;
@@ -177,8 +180,9 @@ namespace MiniBot
             btnShot.Click += delegate { Raise(ScreenshotRequested); };
             chips.Removed += delegate (int index) { if (ChipRemoved != null) ChipRemoved(index); };
             btnSend.Click += delegate { SendNow(); };
-            btnAllow.Click += delegate { Raise(ConsentAllowed); };
-            btnNotNow.Click += delegate { Raise(ConsentDeclined); };
+            btnAllow.Click += delegate { if (choices != null) Choose(0); else Raise(ConsentAllowed); };
+            btnNotNow.Click += delegate { if (choices != null) Choose(1); else Raise(ConsentDeclined); };
+            btnThird.Click += delegate { Choose(2); };
             btnContinue.Click += delegate { FinishOnboarding(); };
             btnSkip.Click += delegate { Raise(OnboardingSkipped); };
             picker.Picked += delegate (CommandItem item) { Choose(item, false); input.Focus(); };
@@ -440,7 +444,7 @@ namespace MiniBot
             chips.Colors = p; chips.BackColor = p.Bg; chips.Invalidate();
             modelLbl.Colors = p; modelLbl.BackColor = p.Bg; modelLbl.Invalidate();
             picker.Colors = p; picker.BackColor = p.Bg; picker.Invalidate();
-            foreach (var b in new[] { btnAllow, btnNotNow, btnContinue, btnSkip }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
+            foreach (var b in new[] { btnAllow, btnNotNow, btnThird, btnContinue, btnSkip }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
             RenderConversation();
             Invalidate();
         }
@@ -534,6 +538,9 @@ namespace MiniBot
 
         public void ShowConsent(string text)
         {
+            choices = null;
+            SetChoice(btnAllow, "Allow", true);
+            SetChoice(btnNotNow, "Not now", false);
             mode = Consent;
             noticeIsError = false;
             notice.Text = text;
@@ -545,8 +552,47 @@ namespace MiniBot
         {
             if (mode != Consent) return;
             mode = Chat;
+            choices = null;
             notice.Text = "";
             Relayout();
+        }
+
+        /// <summary>A question with two or three answers, such as computer control's. The answer comes back as ChoiceMade.</summary>
+        public void ShowChoices(string text, string[] labels, int primary)
+        {
+            if (mode == Consent && choices != null && notice.Text == text && string.Join("|", choices) == string.Join("|", labels)) return;
+            if (mode == Onboarding) input.Hint = "Type, or hold Space to talk";
+            choices = labels;
+            SetChoice(btnAllow, labels.Length > 0 ? labels[0] : "", primary == 0);
+            SetChoice(btnNotNow, labels.Length > 1 ? labels[1] : "", primary == 1);
+            SetChoice(btnThird, labels.Length > 2 ? labels[2] : "", primary == 2);
+            mode = Consent;
+            noticeIsError = false;
+            notice.Text = text;
+            notice.ForeColor = pal.Fg;
+            Relayout();
+        }
+
+        /// <summary>While true, showing the panel leaves the window in front where it is (computer control's questions).</summary>
+        public bool ShowQuietly;
+
+        protected override bool ShowWithoutActivation { get { return ShowQuietly; } }
+
+        /// <summary>True while a question card (not the microphone consent) is shown.</summary>
+        public bool IsAsking { get { return mode == Consent && choices != null; } }
+
+        static void SetChoice(TextButton button, string text, bool primary)
+        {
+            button.Text = text;
+            button.AccessibleName = text;
+            button.Primary = primary;
+            button.Invalidate();
+        }
+
+        void Choose(int index)
+        {
+            if (choices == null || index >= choices.Length) return;
+            if (ChoiceMade != null) ChoiceMade(index);
         }
 
         public void StartOnboarding(string botName)
@@ -753,12 +799,22 @@ namespace MiniBot
                 y += nh + gap;
             }
 
+            bool third = consent && choices != null && choices.Length > 2;
             btnAllow.Visible = btnNotNow.Visible = consent;
+            btnThird.Visible = third;
             if (consent)
             {
-                btnAllow.SetBounds(m, y, Ui.Px(150), Ui.Px(30));
-                btnNotNow.SetBounds(m + Ui.Px(158), y, Ui.Px(100), Ui.Px(30));
-                y += Ui.Px(30) + gap;
+                // Each button as wide as its words; a row that would not fit goes on to the next. (Which ones show is
+                // decided here, not read back from Visible: that reads false for every button while the panel is hidden.)
+                int bx = m, bh = Ui.Px(30);
+                foreach (var b in third ? new[] { btnAllow, btnNotNow, btnThird } : new[] { btnAllow, btnNotNow })
+                {
+                    int bw = Math.Max(Ui.Px(84), TextRenderer.MeasureText(b.Text, b.Font).Width + Ui.Px(28));
+                    if (bx > m && bx + bw > m + inner) { bx = m; y += bh + Ui.Px(6); }
+                    b.SetBounds(bx, y, Math.Min(bw, inner), bh);
+                    bx += bw + Ui.Px(8);
+                }
+                y += bh + gap;
             }
 
             int chipsH = chat && chips.Count > 0 ? chips.HeightFor(inner) : 0;

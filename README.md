@@ -6,6 +6,7 @@ The default bot is **Clawd**, Claude Code's own mascot, drawn as the flat pixel 
 
 - Click it, type a prompt, press Enter. Or hold Space and talk.
 - Snip any part of the screen and ask Claude about it.
+- Let Claude use your mouse and keyboard for a task, in the apps you allow, while you watch: move the mouse to take over, Ctrl+Alt+Esc to stop.
 - Hide it, move it, restyle it, keep several bots. Claude Code is never interrupted.
 - Nothing is listened to or captured until you say yes, and a red indicator is always shown while it is.
 
@@ -176,6 +177,25 @@ Under the panel's header a thin line shows what your Claude Code session is runn
 - Only one program can own a combination. If another program already has it, the tray icon shows a warning, `/mini-bot status` says the shortcut does not work, and the fix is to pick another with `set hotkey`.
 - It works while the companion runs; `/mini-bot stop` releases it.
 
+### Computer control: Claude uses your mouse and keyboard
+
+Ask Claude to do something on your PC that needs the mouse and keyboard ("in the Excel sheet that's open, add a bar chart of column B", "turn on dark mode in Settings") and it can do it on your screen, step by step, where you watch it. Everything stays under your permission, at several levels:
+
+1. **Claude Code's own permission prompt.** The four tools (`computer_start`, `computer_look`, `computer_act`, `computer_stop`) ask the first time, like any tool.
+2. **Your yes in the bot, for this one task.** Claude says what it will do and which apps it needs; the bot shows it, and you choose **Allow, ask me each step**, **Allow, ask before important steps**, or **Deny**. Nothing is granted ahead, and the grant ends with the task.
+3. **Only the apps you allowed.** A click or a key press anywhere else is refused (Claude must ask again with that app listed). Some programs can never be controlled, whatever you allow: terminals and code editors (where Claude Code itself runs, so it can never answer its own permission prompts), password managers, Windows Security, Task Manager, the Registry and other system tools, and anything running as administrator.
+4. **Steps you approve.** At "ask me each step" every step waits for **Allow / Skip / Stop** in the bot, with a ring on the spot it will touch. At "ask before important steps" only steps that send, delete, buy, pay, submit, install or close (and anything Claude marks as important) wait for you.
+5. **Hard limits no setting removes.** It never types into password fields or types something that looks like a card number (it asks you to), never sends Windows-key shortcuts, Ctrl+Alt shortcuts, Alt+Tab or the bot's own keys, and after 150 steps or 20 minutes it stops and asks whether to go on.
+
+While Claude has control you can see it: an orange frame around every monitor, and a red bar at the top saying how to take over and how to stop. **Move the mouse or press any key and it pauses at once**: the frame turns amber, Claude waits, and the bot offers **Give control back** or **Stop**. **Ctrl+Alt+Esc**, a click on the bar, the bot's right-click menu, the tray icon or `/mini-bot control stop` end it at once. It also ends when Claude says it is done, when its turn ends or is interrupted, when you lock the PC, after 3 idle minutes, or when the companion stops: control never outlives the request that asked for it.
+
+- Claude sees the screen as a picture of one monitor (the bot's frame and markers left out) with the names of the window's buttons and fields, which it can click by number. Whatever is on the screen is treated as information, never as instructions: a web page or email that says "do X" is not obeyed.
+- Claude still prefers its other tools: files, commands and settings through the shell, websites through browser automation. The mouse is for the apps that have no other way in.
+- During control only, the bot watches whether input comes from you or from itself (to pause when you take over). It never records which keys you press or where the mouse goes, and it stops watching when control ends.
+- `/mini-bot log` lists what Claude did in the last session; every session is also kept for a week in `%APPDATA%\ClaudeMiniBot\computer-log`.
+- Settings (`/mini-bot settings` > Computer control, or typed): `set computer-level step|important|free` ("free" adds **Allow, don't ask** to the question; Claude then acts without asking within the allowed apps, and you can still take over or stop), `set computer-stop-key ctrl+alt+pause`, `set computer-blocked-apps outlook, chrome`, `set computer-limits 150 20` (steps, minutes).
+- It is a real program pressing keys: it is slower than you (a second or two per step, longer when you approve each one), it can misclick (it looks after every step to check), and each picture uses part of your Claude usage.
+
 ### Dropping files on the bot
 
 Drag files or folders from Explorer onto the bot (or onto its open panel) and it eats them: its mouth opens as soon as the drag is over it, the file flies in, it chews twice and swallows. A shrug means the kind of file is one Claude may not open directly. A shake of the head means nothing could be taken. Ctrl+V in the prompt does the same with files copied in Explorer. Nothing about the bot's look changes the rest of the time: the mouth only exists while it is eating, and with **reduced motion** on the animation is skipped (the files are still attached).
@@ -204,6 +224,8 @@ Per bot: name, avatar (Clawd, blob, robot, cat, ghost, bunny), skin (Claude's or
 | `/mini-bot screenshot` | snip part of the screen |
 | `/mini-bot speech [install [small]]` | which speech recognizer is in use; set up offline Whisper |
 | `/mini-bot update` | which version is installed, whether GitHub has a newer one, and the commands to install it |
+| `/mini-bot control stop` | take the mouse and keyboard back from Claude at once |
+| `/mini-bot log` | what Claude did the last time it used your mouse and keyboard |
 | `/mini-bot help` | the list |
 
 ## Security model
@@ -212,6 +234,7 @@ Per bot: name, avatar (Clawd, blob, robot, cat, ghost, bunny), skin (Claude's or
 - Prompts reach Claude Code only through `$.prompt.submit`, so they run under your normal permission rules and appear in the transcript. The bot never reads or changes Claude Code's permission rules, and it is not a second assistant.
 - Access to the microphone (and screen, and computer control) is the companion's own and separate from Claude Code's permissions. Granting needs your explicit answer (a dialog in Claude Code, or the Allow button in the bot's panel); the runtime also refuses a grant that does not say it was confirmed. Grants last only while the runtime runs, so a restarted companion starts with nothing granted. Stopping the companion ends every capture.
 - The access indicator is computed from live access state alone, so hiding the bot cannot hide it.
+- Computer control is allowed one task at a time, in the bot, and only for the apps you allowed; the runtime checks every step against your answer, the allowed apps and the hard limits before the bot touches anything. Your answers in the bot carry a second secret that only the bot's own window process holds (never written to disk), so nothing that reads the runtime's token can answer for you, and Claude can never click the bot's own buttons or Claude Code's prompts.
 - The local interface listens on `127.0.0.1` only, on a random port, and every request needs a secret token kept in your user folder. Requests that carry an `Origin` header (a web page) or an unexpected `Host` are refused.
 - The bot refuses to take prompts while nothing in Claude Code is picking them up.
 - Nothing runs in the background without you: no hidden AI behaviour, no silent microphone or screen capture.
@@ -267,7 +290,8 @@ node --test "runtime/test/*.test.mjs"
 
 - Windows only. The overlay is a Windows program.
 - Without Whisper, voice recognition is only as good as the built-in Windows recognizer (it can be rough). Whisper only writes the words after you stop talking, so there is no live text while you speak, and it needs a microphone Windows lets desktop apps use. English only for now.
-- Computer control has a permission switch but nothing in this package uses it yet.
+- Computer control works on the apps Windows' accessibility interface describes well (Office, Explorer, Settings, most desktop apps); games, remote desktops and apps that draw everything themselves are hit and miss. Admin windows are out of reach by design.
+- Taking over is noticed from real mouse and keyboard input; input that another program sends (a remote-desktop tool, a macro tool) is not counted as you.
 - Leaving the bot out of screenshots needs Windows 10 version 2004 or later; on older Windows it is hidden for a moment instead.
 - Voice-reply speech, sound effects and notification settings are stored and sent to the runtime; nothing consumes them yet.
 - A companion started before an update must be restarted (`/mini-bot stop`, then `/mini-bot start`) to pick up the new version.

@@ -230,3 +230,22 @@ test('the shortcut field changes only the shortcut, resets, and turns off', asyn
   expect(normalizeConfig({ hotkey: { toggle: 'banana' } }).hotkey.toggle).toBe('Ctrl+Alt+B')
   expect(normalizeConfig({ hotkey: { toggle: 'off' } }).hotkey.toggle).toBe('off')
 })
+
+test('computer control settings: the level, a stop key that cannot be turned off or clash, blocked apps and limits', async () => {
+  const config = defaultConfig()
+  expect(config.computer).toEqual({ level: 'step', stopKey: 'Ctrl+Alt+Esc', blockedApps: [], maxActions: 150, maxMinutes: 20 })
+  const set = (id: string, raw: string, from = config) => findField(id)!.apply(from, from.activeProfileId, raw)
+  expect(set('computer-level', 'important')).toMatchObject({ config: { computer: { level: 'important' } } })
+  expect(set('computer-level', 'yolo')).toMatchObject({ error: expect.stringContaining('step, important, free') })
+  expect(set('computer-stop-key', 'ctrl+alt+pause')).toMatchObject({ config: { computer: { stopKey: 'Ctrl+Alt+Pause' } } })
+  expect(set('computer-stop-key', 'off')).toMatchObject({ error: expect.stringContaining('cannot be turned off') })
+  expect(set('computer-stop-key', 'ctrl+alt+b')).toMatchObject({ error: expect.stringContaining('hide/show shortcut') })
+  expect(set('hotkey', 'ctrl+alt+esc')).toMatchObject({ error: expect.stringContaining('stops computer control') })
+  expect(set('computer-blocked-apps', 'Outlook.exe, chrome')).toMatchObject({ config: { computer: { blockedApps: ['outlook', 'chrome'] } } })
+  expect(set('computer-blocked-apps', 'none')).toMatchObject({ config: { computer: { blockedApps: [] } } })
+  expect(set('computer-blocked-apps', 'a/b')).toMatchObject({ error: expect.stringContaining('not a program name') })
+  expect(set('computer-limits', '300 45')).toMatchObject({ config: { computer: { maxActions: 300, maxMinutes: 45 } } })
+  expect(set('computer-limits', '5 45')).toMatchObject({ error: expect.stringContaining('10 to 1000') })
+  // A stored stop key nobody can use falls back to the default rather than leaving control without one.
+  expect(normalizeConfig({ computer: { stopKey: 'off' } }).computer.stopKey).toBe('Ctrl+Alt+Esc')
+})
