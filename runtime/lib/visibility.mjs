@@ -7,7 +7,9 @@
 
 export const isVisible = config => config.visible === true
 
-export const indicatorFor = permissions => {
+// `standby` is the microphone open for the bot's name alone: the overlay shows it with a smaller mark of its own,
+// which is no more the character's to hide than the rest of the indicator.
+export const indicatorFor = (permissions, standby = false) => {
   const kinds = permissions.activeKinds()
-  return { visible: kinds.length > 0, kinds }
+  return { visible: kinds.length > 0, kinds, standby }
 }

@@ -2,6 +2,7 @@
 //
 //   node server.mjs --detach   start a background runtime and return at once
 //   node server.mjs --serve    run the runtime in this process
+//   --pc-start after either    it is the PC starting up, so Mini's own session waits for the rush to pass
 //
 // Runs on Node alone, with no packages. Its state lives in %APPDATA%\ClaudeMiniBot
 // (or ~/.claude-mini-bot elsewhere); MINI_BOT_HOME overrides the folder.
@@ -34,7 +35,7 @@ const isAlreadyRunning = async () => {
 const main = async () => {
   const mode = process.argv[2]
   if (mode === '--detach') {
-    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--serve'], {
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--serve', ...process.argv.slice(3)], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
@@ -51,6 +52,7 @@ const main = async () => {
   const runtime = createRuntime({
     dataDir: dataDir(),
     overlay: defaultOverlay(),
+    startedByPc: process.argv.includes('--pc-start'),
     onExit: () => process.exit(0),
   })
   await runtime.start()

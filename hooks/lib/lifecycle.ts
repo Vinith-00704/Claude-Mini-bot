@@ -102,10 +102,11 @@ export async function stopRuntime($: Engine, { remember = false } = {}): Promise
   const link = await connect($)
   await rememberRunning($, remember)
   if (!link) return { ok: true, message: 'Mini Bot is not running.' }
-  const reply = await request($, link, 'POST', '/v1/shutdown', {})
+  // With `remember` the session is just ending; otherwise the person is turning it off, and it stays off.
+  const reply = await request($, link, 'POST', '/v1/shutdown', { off: !remember })
   if (!reply.ok) return { ok: false, message: `The companion refused to stop: ${reply.error}.` }
   const gone = await waitFor($, async () => (await connect($)) === null, STOP_WAIT_MS)
   return gone
-    ? { ok: true, message: 'Mini Bot stopped. Screen, microphone and computer access ended with it; Claude Code is untouched.' }
+    ? { ok: true, message: 'Mini Bot stopped. Screen, microphone and computer access ended with it, and so did Mini\'s own background session if it had one; your other Claude Code sessions are untouched.' }
     : { ok: false, message: 'Asked the companion to stop but it is still answering.' }
 }

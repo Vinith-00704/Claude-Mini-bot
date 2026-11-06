@@ -13,8 +13,14 @@ export {
   CONTROL_LEVELS,
   CONTROL_MINUTES_RANGE,
   DEFAULT_HOTKEY,
+  DEFAULT_LOOK_KEY,
   DEFAULT_STOP_KEY,
+  DEFAULT_TALK_KEY,
   appName,
+  modelName,
+  SESSION_PERMISSIONS,
+  SPEAK_MODES,
+  VOICE_RATE_RANGE,
   IDLE_STYLES,
   MODEL_LABELS,
   PANEL_REPLY_RANGE,
@@ -40,7 +46,9 @@ export type {
   Profile,
   ProfilePatch,
   Result,
+  SessionPermissions,
   SettingsPatch,
+  SpeakMode,
   Size,
   Skin,
   Speed,
@@ -70,9 +78,17 @@ export type RuntimeState = {
   config: Config
   overlay: { visible: boolean; driver: string; isAttached: boolean }
   permissions: Record<Kind, Access>
-  indicator: { visible: boolean; kinds: Kind[] }
+  indicator: { visible: boolean; kinds: Kind[]; standby?: boolean }
+  /** What the person allowed for good, in the bot (absent from a companion that predates it). */
+  trust?: { listen: boolean; full: boolean; mic: boolean }
+  /** Mini's own Claude Code session (absent from a companion that predates it). */
+  assistant?: { status: 'off' | 'starting' | 'running' | 'needs-you' | 'failed'; wanted: boolean; pid: number | null; sessionId: string | null; note: string; home: string; startsWithPc: boolean }
+  /** The Claude Code sessions connected now, and which one the bot talks to. */
+  sessions?: { id: string; role: 'main' | 'terminal'; name: string; target: boolean; pinned: boolean }[]
+  /** How many routines there are. */
+  routines?: number
   activity: { phase: Phase; id: string | null; detail: string; source: 'bot' | 'claude' }
-  voice: { state: 'idle' | 'listening'; error: string | null; heard: string | null }
+  voice: { state: 'idle' | 'listening' | 'standby'; error: string | null; heard: string | null }
   /** What the session runs on, once it has said (absent from a companion that predates it). Ages are in milliseconds. */
   session?: { model: string; name: string; effort: string | null; ageMs: number; switched: { from: string; to: string; ageMs: number } | null } | null
   /** Computer control as the companion has it (absent from a companion that predates it). */
@@ -98,7 +114,7 @@ export type Attachment =
   | { type: 'file'; path: string; kind: 'file' | 'folder'; direct: boolean }
 
 /** A prompt typed or spoken into the floating bot, waiting for Claude Code. */
-export type QueuedPrompt = { id: string; text: string; source: 'text' | 'voice'; attachments?: Attachment[]; at: number }
+export type QueuedPrompt = { id: string; text: string; source: 'text' | 'voice' | 'routine'; attachments?: Attachment[]; at: number }
 
 /** The oldest runtime that has the prompt queue and the shared configuration. */
 export const MIN_RUNTIME_VERSION = 2

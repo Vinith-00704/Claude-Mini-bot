@@ -45,7 +45,7 @@ const needRuntime = 'Mini Bot is not running, so nothing is granted. Start it fi
 export async function grantAccess($: Engine, kind: Kind): Promise<string> {
   // Computer control is never granted ahead: each task is allowed on its own, in the bot, when Claude asks.
   if (kind === 'computer') {
-    return 'Computer control is allowed one task at a time: when Claude asks, the bot shows what it wants to do and in which apps, and you answer there. There is nothing to grant ahead. /mini-bot control stop ends it at any time.'
+    return 'Computer control is allowed one task at a time: when Claude asks, the bot shows what it wants to do and in which apps, and you answer there. To let Claude act without asking, /mini-bot full-access on asks you in the bot. /mini-bot control stop ends it at any time.'
   }
   const link = await connect($)
   if (!link) return needRuntime

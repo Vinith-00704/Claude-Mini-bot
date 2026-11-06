@@ -191,7 +191,7 @@ test('a bot that still has the old factory look takes the new default; a customi
     ],
   }
   const migrated = normalizeConfig(old)
-  expect(migrated.version).toBe(2)
+  expect(migrated.version).toBe(3)
   expect(migrated.profiles.map(p => [p.name, p.avatar, p.appearance.skin])).toEqual([
     ['Mini', 'clawd', 'claude'],
     ['avis', 'ghost', 'sunrise'],

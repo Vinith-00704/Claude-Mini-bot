@@ -557,6 +557,14 @@ namespace MiniBot
             Relayout();
         }
 
+        /// <summary>Opens the panel for something the person did not click on, leaving the window in front where it is.</summary>
+        public void ShowWithoutTakingFront()
+        {
+            ShowQuietly = true;
+            try { Show(); }
+            finally { ShowQuietly = false; }
+        }
+
         /// <summary>A question with two or three answers, such as computer control's. The answer comes back as ChoiceMade.</summary>
         public void ShowChoices(string text, string[] labels, int primary)
         {

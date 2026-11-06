@@ -55,6 +55,10 @@ namespace MiniBot
         public int Level;
         /// <summary>The loudest 100 ms so far, 0-100.</summary>
         public int Peak;
+        /// <summary>Set before Start: false keeps nothing, for a listener that only looks at each moment as it passes.</summary>
+        public bool KeepAudio = true;
+        /// <summary>Handed each 100 ms of audio as it comes in, on the thread that polls.</summary>
+        public Action<byte[]> Chunk;
         public double Seconds { get { return pcm.Length / (SampleRate * 2.0); } }
 
         public void Start()
@@ -105,17 +109,24 @@ namespace MiniBot
             if (bytes <= 0) return;
             var chunk = new byte[bytes];
             Marshal.Copy(hdr.Data, chunk, 0, bytes);
-            pcm.Write(chunk, 0, bytes);
+            if (KeepAudio) pcm.Write(chunk, 0, bytes);
+            Level = LevelOf(chunk);
+            if (Level > Peak) Peak = Level;
+            if (Chunk != null) Chunk(chunk);
+        }
+
+        /// <summary>How loud this audio is, 0-100.</summary>
+        public static int LevelOf(byte[] chunk)
+        {
             double sum = 0;
-            int samples = bytes / 2;
+            int samples = chunk.Length / 2;
             for (int i = 0; i < samples; i++)
             {
                 short s = (short)(chunk[2 * i] | (chunk[2 * i + 1] << 8));
                 sum += (double)s * s;
             }
             double rms = samples > 0 ? Math.Sqrt(sum / samples) : 0;
-            Level = (int)Math.Min(100.0, rms / 32768.0 * 700.0);
-            if (Level > Peak) Peak = Level;
+            return (int)Math.Min(100.0, rms / 32768.0 * 700.0);
         }
 
         /// <summary>Closes the microphone and returns what was recorded as a WAV file's bytes.</summary>
@@ -132,12 +143,12 @@ namespace MiniBot
                 }
                 Release();
             }
-            return Wav();
+            return ToWav(pcm.ToArray());
         }
 
-        byte[] Wav()
+        /// <summary>Mono 16-bit audio as a WAV file's bytes.</summary>
+        public static byte[] ToWav(byte[] audio, int rate = SampleRate)
         {
-            byte[] audio = pcm.ToArray();
             using (var ms = new MemoryStream())
             using (var w = new BinaryWriter(ms))
             {
@@ -147,8 +158,8 @@ namespace MiniBot
                 w.Write(16);
                 w.Write((short)1);
                 w.Write((short)1);
-                w.Write(SampleRate);
-                w.Write(SampleRate * 2);
+                w.Write(rate);
+                w.Write(rate * 2);
                 w.Write((short)2);
                 w.Write((short)16);
                 w.Write(new[] { 'd', 'a', 't', 'a' });

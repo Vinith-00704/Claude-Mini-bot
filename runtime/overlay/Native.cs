@@ -51,6 +51,9 @@ namespace MiniBot
         [DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(IntPtr hwnd);
 
+        [DllImport("user32.dll")]
+        public static extern short GetAsyncKeyState(int key);
+
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
 

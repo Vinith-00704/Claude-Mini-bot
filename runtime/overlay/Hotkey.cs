@@ -1,6 +1,6 @@
-// The keyboard shortcut that hides and shows the bot from any program (Ctrl+Alt+M unless changed).
-// It is a Windows hot key: the shortcut is read only while it is pressed, nothing else about the keyboard is
-// seen, and it does one thing, which is to raise Pressed. Pressing it never reaches Claude Code.
+// A keyboard shortcut that works from any program: hiding the bot, stopping computer control, talking, showing
+// Claude the window in front. It is a Windows hot key: the shortcut is read only while it is pressed, nothing else
+// about the keyboard is seen, and it does one thing, which is to raise Pressed. Pressing it never reaches Claude Code.
 
 using System;
 using System.Windows.Forms;
@@ -63,6 +63,7 @@ namespace MiniBot
             if (name.Length >= 2 && name[0] == 'F' && int.TryParse(name.Substring(1), out n) && n >= 1 && n <= 12) { key = (uint)(0x70 + n - 1); return true; }
             if (name == "ESC") { key = 0x1B; return true; }
             if (name == "PAUSE") { key = 0x13; return true; }
+            if (name == "SPACE") { key = 0x20; return true; }
             return false;
         }
 

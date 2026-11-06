@@ -6,20 +6,26 @@ import { createServer } from 'node:http'
 import { existsSync, statSync } from 'node:fs'
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
-import { applyOp, normalizeConfig, sameChoices } from '../../shared/config.mjs'
+import { activeProfile, applyOp, normalizeConfig, sameChoices } from '../../shared/config.mjs'
 import { Activity, Voice } from './activity.mjs'
 import { check, newToken, sameToken } from './auth.mjs'
+import { createAutostart } from './autostart.mjs'
+import { Cards } from './cards.mjs'
 import { Commands } from './commands.mjs'
 import { Computer } from './computer.mjs'
+import { Keeper } from './keeper.mjs'
 import { Permissions } from './permissions.mjs'
 import { Prompts } from './prompts.mjs'
+import { Routines } from './routines.mjs'
 import { Session } from './session.mjs'
+import { Trust } from './trust.mjs'
 import { indicatorFor, isVisible } from './visibility.mjs'
 
 // 2: configuration owned here, prompt queue, activity and voice state.
 // 3: the list of slash commands for the bot's `/` picker.
 // 4: computer control.
-export const VERSION = 4
+// 5: Mini's own session, several sessions at once, questions in the bot, routines, full access, listening.
+export const VERSION = 5
 const MAX_BODY = 64 * 1024
 // The list of slash commands is the one long request: a session with many skills makes it so.
 // So is the overlay's report of a look or a step, which carries a picture of the screen.
@@ -28,6 +34,13 @@ const MAX_BODY_BY_ROUTE = { 'POST /v1/commands': 256 * 1024, 'POST /v1/computer/
 const SCREENSHOT_DAYS = 7
 // The entries of the last control session kept in memory for /mini-bot log.
 const LOG_KEEP = 400
+// Mini's own session starts this long after the PC does, once the rush of programs at sign-in has passed.
+const PC_START_DELAY_MS = 20 * 1000
+const ROUTINE_CHECK_MS = 15 * 1000
+// Said by a routine: kept this long for the overlay to pick up.
+const ANNOUNCE_KEEP_MS = 2 * 60 * 1000
+// The file that says the person turned Mini off: a new Claude Code session leaves it off until they turn it on.
+export const OFF_FLAG = 'turned-off'
 
 const fail = (status, error) => Object.assign(new Error(error), { status })
 
@@ -53,12 +66,14 @@ const writeAtomic = async (file, text) => {
   await rename(temp, file)
 }
 
-export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.now }) => {
+export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.now, autostart = createAutostart({ dataDir }), keeperOptions = {}, startedByPc = false }) => {
   const token = newToken()
   // A second secret, handed only to the overlay process and never written to disk: the person's answers in the
   // bot (allow, skip, stop, take over) need it, so nothing that can read runtime.json can answer for them.
   const overlayKey = newToken()
   const permissions = new Permissions({ now })
+  const trust = new Trust({ file: join(dataDir, 'trust.json') })
+  const cards = new Cards({ now })
   const activity = new Activity({ now })
   const voice = new Voice()
   const session = new Session({ now })
@@ -88,16 +103,35 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
       return null
     }
   }
-  const prompts = new Prompts({ now, checkImage: isScreenshot, checkPath: kindOfPath })
+  // Built below the configuration it reads, at its first use.
+  let keeper = null
+  const prompts = new Prompts({ now, checkImage: isScreenshot, checkPath: kindOfPath, canWait: () => keeper.isWanted })
+  const routines = new Routines({ file: join(dataDir, 'routines.json'), now })
+  let announcement = null
+  let routineTimer = null
+  let offered = false
+  let pcStart = false
   // Things asked for from Claude Code that the overlay carries out (taking a screenshot).
   const requests = { screenshot: 0 }
   // Whether Windows gave the overlay the hide/show shortcut ({ combo, ok }); another program may already own it.
   let hotkeyReport = null
+  // The same for the other shortcuts, by name.
+  const keyReports = {}
   const startedAt = now()
   const infoFile = join(dataDir, 'runtime.json')
   const cacheFile = join(dataDir, 'runtime-state.json')
   let config = normalizeConfig(undefined)
-  computer = new Computer({ now, permissions, activity, config: () => config, isOverlayAttached: () => overlay.isAttached, log: logControl })
+  computer = new Computer({ now, permissions, activity, config: () => config, isFull: () => trust.get('full'), isOverlayAttached: () => overlay.isAttached, log: logControl })
+  keeper = new Keeper({
+    dataDir,
+    config: () => config,
+    trust,
+    isConnected: () => prompts.isMainAlive,
+    onClosed: () => prompts.forgetMain(),
+    botName: () => activeProfile(config).name,
+    now,
+    ...keeperOptions,
+  })
   let server = null
   let port = 0
   let isStopping = false
@@ -111,8 +145,88 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
   const setConfig = next => {
     const normalized = normalizeConfig(next)
     if (sameChoices(normalized, config)) return
+    const was = config.assistant
     config = { ...normalized, revision: config.revision + 1 }
     void persist()
+    // The person asked for Mini's own session, or no longer wants it; a new model or mode takes effect at a restart.
+    const now_ = config.assistant
+    if (now_.session !== was.session) {
+      if (now_.session) void keeper.retry()
+      else void keeper.stop()
+    } else if (now_.session && (now_.model !== was.model || now_.permissions !== was.permissions)) void keeper.restart()
+    maybeOffer()
+  }
+
+  // ---- what the person allows, in the bot ----
+
+  const ANSWER_YES = { id: 'yes', label: 'Turn it on', primary: true }
+  const ANSWER_NO = { id: 'no', label: 'Not now' }
+  const TRUST_QUESTIONS = {
+    listen: () => `Let ${activeProfile(config).name} listen for its name all the time, so you can just say "Hey ${activeProfile(config).name}"?\nYour microphone stays on, and a small mark on your screen says so the whole time. Listening happens on this PC: nothing leaves it until you say the name, and then only what you say to it goes to Claude. You can turn it off any time.`,
+    full: () => `Give Claude full access to your mouse and keyboard?\nClaude Code's session can then use any app without asking you first or asking about each step, including sending and deleting, so a mistake will not be stopped by a question. You still see it working, moving your mouse pauses it, ${config.computer.stopKey} stops it, and every step is logged. It stays on until you turn it off. It can never use terminals and code editors, password managers, sign-in or security screens, administrator windows or password fields.`,
+  }
+
+  /** Puts up the question that turns one of them on. Only the person's own click in the bot can answer it. */
+  const askTrust = kind => {
+    if (!TRUST_QUESTIONS[kind]) throw fail(400, 'what is listen or full')
+    if (!overlay.isAttached) throw fail(409, 'the bot is not on the screen to ask you')
+    if (trust.get(kind)) return
+    cards.dismiss(`trust-${kind}`)
+    void cards.ask({ kind: `trust-${kind}`, text: TRUST_QUESTIONS[kind](), options: [ANSWER_YES, ANSWER_NO] }).then(choice => {
+      if (choice !== 'yes') return
+      trust.set(kind, true)
+      if (kind === 'listen') permissions.grant('microphone', { confirmed: true })
+      // A session with full access works across every drive, which is set when it starts.
+      if (kind === 'full' && config.assistant.session && ['idle', 'completed', 'error'].includes(activity.snapshot().phase)) void keeper.restart()
+    })
+  }
+
+  /** Taking one back needs nothing, and takes effect at once. */
+  const dropTrust = kind => {
+    trust.set(kind, false)
+    if (kind === 'listen') voice.stop()
+    if (kind === 'full' && computer.snapshot().status !== 'off') computer.stop({ reason: 'full access was turned off' })
+  }
+
+  /** The one time the person is asked whether they want Mini as an always-on assistant. */
+  function maybeOffer() {
+    if (offered || config.assistant.offered || !config.onboarded || !overlay.isAttached || process.platform !== 'win32') return
+    offered = true
+    const name = activeProfile(config).name
+    void cards.ask({
+      kind: 'setup',
+      text: `Make ${name} your always-on assistant?\n${name} would start with your PC and keep its own Claude Code session running in the background, so you can talk to it any time with no terminal open. It uses your Claude plan only when you ask it something. You can turn it off any time.`,
+      options: [{ id: 'yes', label: 'Set it up', primary: true }, { id: 'no', label: 'Not now' }],
+    }).then(async choice => {
+      if (choice === 'stopped') return
+      const patch = { offered: true, ...(choice === 'yes' ? { session: true } : {}) }
+      const applied = applyOp(config, { op: 'settings', patch: { assistant: patch } })
+      if (!('error' in applied)) setConfig(applied.config)
+      if (choice !== 'yes') return
+      const done = await autostart.enable()
+      pcStart = done.ok
+      askTrust('listen')
+    })
+  }
+
+  // ---- routines ----
+
+  const fireRoutines = () => {
+    for (const routine of routines.due()) {
+      if (routine.kind === 'say') {
+        announcement = { id: routine.id + '-' + now(), text: routine.text, at: now() }
+        continue
+      }
+      try {
+        const item = prompts.enqueue({ text: routine.text, source: 'routine' })
+        announcement = { id: item.id, text: `Running your routine: ${routine.text}`, at: now(), quiet: true }
+        activity.set({ phase: 'sending', id: item.id, detail: 'Running a routine', source: 'bot', preview: null })
+        void keeper.ensure()
+      } catch (error) {
+        announcement = { id: routine.id + '-' + now(), text: `A routine could not run: ${routine.text} (${error.message})`, at: now() }
+      }
+    }
+    if (announcement && now() - announcement.at > ANNOUNCE_KEEP_MS) announcement = null
   }
 
   const endVoiceIfMicStopped = () => {
@@ -127,13 +241,20 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     config,
     overlay: { visible: isVisible(config), driver: overlay.name, isAttached: overlay.isAttached },
     permissions: permissions.snapshot(),
-    indicator: indicatorFor(permissions),
+    indicator: indicatorFor(permissions, voice.snapshot().state === 'standby'),
+    trust: trust.snapshot(),
+    assistant: { ...keeper.snapshot(), startsWithPc: pcStart },
+    sessions: prompts.sessions(),
+    card: cards.current(),
+    announcement,
+    routines: routines.list().length,
     activity: activity.snapshot(),
     voice: voice.snapshot(),
     session: session.snapshot(),
     computer: computer.snapshot(),
     // Only a report about the shortcut now chosen counts; one about a shortcut since changed is old news.
     hotkey: hotkeyReport && hotkeyReport.combo === config.hotkey.toggle ? { ...hotkeyReport } : null,
+    keys: { ...keyReports },
     commands: commands.summary(),
     bridge: { connected: prompts.isBridgeAlive, queued: prompts.size },
     paths: { screenshots: screenshotsDir, computerLog: computerLogDir },
@@ -170,33 +291,52 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     'POST /v1/overlay/position': body => change({ op: 'move', x: body.x, y: body.y }),
     'POST /v1/prompts': body => {
       const item = prompts.enqueue(body)
-      activity.set({ phase: 'sending', id: item.id, detail: 'Sending to Claude Code', source: 'bot', preview: null })
+      const waking = prompts.target() === null
+      activity.set({ phase: 'sending', id: item.id, detail: waking ? 'Waking up Claude Code' : 'Sending to Claude Code', source: 'bot', preview: null })
+      if (waking) void keeper.ensure()
       return { id: item.id, state: state() }
     },
-    'POST /v1/prompts/claim': () => ({ prompts: prompts.claim(), revision: config.revision, version: VERSION }),
+    'POST /v1/prompts/claim': body => {
+      const claimed = prompts.claim(body.bridge)
+      if (body.bridge?.role === 'main') keeper.noteSession(body.bridge.id, body.bridge.pid)
+      return { ...claimed, revision: config.revision, version: VERSION }
+    },
+    // The person asked to stop what Claude is doing, from the bot.
+    'POST /v1/prompts/abort': () => {
+      prompts.askAbort()
+      return state()
+    },
+    // The person chose which session the bot talks to (null: back to the usual choice).
+    'POST /v1/prompts/target': body => {
+      prompts.pin(typeof body.id === 'string' ? body.id : null)
+      return state()
+    },
     'POST /v1/overlay/request': body => {
       if (body.action !== 'screenshot') throw fail(400, 'action is screenshot')
       requests.screenshot += 1
       return state()
     },
     'POST /v1/activity': body => {
-      activity.set(body)
+      // A turn the person started in a terminal says that is the session they are using.
+      if (typeof body.session === 'string' && body.phase === 'thinking' && body.source !== 'bot') prompts.noteActive(body.session)
+      if (prompts.isTarget(body.session)) activity.set(body)
       return state()
     },
     // The overlay says whether the shortcut it was given is now registered.
     'POST /v1/overlay/hotkey': body => {
       if (typeof body.combo !== 'string' || body.combo.length > 40 || typeof body.ok !== 'boolean') throw fail(400, 'combo is text and ok is true or false')
-      hotkeyReport = { combo: body.combo, ok: body.ok }
+      if (typeof body.name === 'string' && ['talk', 'look'].includes(body.name)) keyReports[body.name] = { combo: body.combo, ok: body.ok }
+      else hotkeyReport = { combo: body.combo, ok: body.ok }
       return state()
     },
     // The Claude Code side says which model the session runs on and at what effort. Shown, never acted on.
     'POST /v1/session': body => {
-      session.set(body)
+      if (prompts.isTarget(body.session)) session.set(body)
       return state()
     },
     // The Claude Code side says which slash commands exist; the overlay reads them for its picker.
     'POST /v1/commands': body => {
-      commands.set(body.commands)
+      if (prompts.isTarget(body.session)) commands.set(body.commands)
       return state()
     },
     'GET /v1/commands': () => commands.snapshot(),
@@ -218,7 +358,52 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     'POST /v1/computer/pause': (body, ctx) => (fromOverlay(ctx), computer.pause(body), state()),
     'POST /v1/computer/resume': (_body, ctx) => (fromOverlay(ctx), computer.resume(), state()),
     'POST /v1/computer/halt': (body, ctx) => (fromOverlay(ctx), computer.stop({ reason: typeof body.reason === 'string' ? body.reason : 'the person stopped it' }), state()),
-    'POST /v1/shutdown': () => {
+    // A look at the screen, and pointing at something on it, without taking control.
+    'POST /v1/screen/look': body => ({ ticket: computer.screenLook(body) }),
+    'POST /v1/screen/point': body => ({ ticket: computer.point(body) }),
+    // Questions for the person. Anyone with the token may ask; only the overlay can answer.
+    'POST /v1/cards/ask': body => ({ ticket: cards.askTicket({ kind: body.kind, text: body.text, options: body.options, waitMs: Number.isFinite(body.waitMs) ? body.waitMs : undefined }) }),
+    'GET /v1/cards/ticket': (_body, ctx) => cards.wait(ctx.query.get('id'), Number(ctx.query.get('wait') ?? 0)),
+    'POST /v1/cards/answer': (body, ctx) => (fromOverlay(ctx), cards.answer(body), state()),
+    // Turning on what stays on (listening, full access) goes through a question in the bot; turning it off goes through nothing.
+    'POST /v1/trust/ask': body => (askTrust(body.what), state()),
+    'POST /v1/trust/off': body => (dropTrust(body.what), state()),
+    // The person pressed Allow on the microphone question in the panel.
+    'POST /v1/trust/mic': (_body, ctx) => (fromOverlay(ctx), trust.set('mic', true), state()),
+    // Starting with the PC, and Mini's own session.
+    'POST /v1/autostart': async body => {
+      if (typeof body.on !== 'boolean') throw fail(400, 'on is true or false')
+      const done = body.on ? await autostart.enable() : await autostart.disable()
+      if (done.ok) pcStart = body.on
+      return { ...done, state: state() }
+    },
+    'POST /v1/assistant': async body => {
+      if (typeof body.on === 'boolean') {
+        const applied = applyOp(config, { op: 'settings', patch: { assistant: { session: body.on, offered: true } } })
+        if ('error' in applied) throw fail(400, applied.error)
+        setConfig(applied.config)
+      }
+      if (body.restart === true) await keeper.restart()
+      return state()
+    },
+    // Routines. A reminder is only words. One that gives Claude a prompt later runs by itself, so the person says yes in the bot first.
+    'GET /v1/routines': () => ({ routines: routines.list() }),
+    'POST /v1/routines': body => {
+      const checked = routines.check(body)
+      if (checked.kind === 'say') return { routine: routines.add(checked) }
+      if (!overlay.isAttached) throw fail(409, 'the bot is not on the screen to ask you')
+      const ticket = cards.askTicket({
+        kind: 'routine',
+        text: `Add a routine that runs by itself?\n"${checked.text}"\nWhen: ${String(body.when).slice(0, 60)}`,
+        options: [{ id: 'yes', label: 'Add it', primary: true }, { id: 'no', label: 'No' }],
+        waitMs: 2 * 60 * 1000,
+      }, choice => (choice === 'yes' ? { routine: routines.add(checked) } : {}))
+      return { ticket }
+    },
+    'POST /v1/routines/remove': body => ({ removed: routines.remove(body.which) }),
+    'POST /v1/shutdown': body => {
+      // Turned off by the person: a new Claude Code session leaves it off until they turn it on.
+      if (body.off === true) void writeFile(join(dataDir, OFF_FLAG), String(now())).catch(() => {})
       setTimeout(() => void stop(), 50)
       return { ok: true }
     },
@@ -237,6 +422,12 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     } else permissions.stopCapture(kind)
     // Taking computer access away, or stopping it, ends control at once.
     if (kind === 'computer' && action !== 'grant') computer.stop({ reason: 'computer access was turned off' })
+    if (kind === 'microphone' && action === 'revoke') {
+      // Turned off in the bot's menu or /mini-bot: that takes back what was allowed for good, too.
+      trust.set('mic', false)
+      trust.set('listen', false)
+      voice.stop()
+    }
     endVoiceIfMicStopped()
     return state()
   }
@@ -284,6 +475,11 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
       const cached = JSON.parse(await readFile(cacheFile, 'utf8'))
       config = normalizeConfig(cached.config)
     } catch {}
+    await trust.load()
+    await routines.load()
+    await rm(join(dataDir, OFF_FLAG), { force: true }).catch(() => {})
+    // What the person allowed for good is theirs across a restart; everything else starts with nothing granted.
+    if (trust.get('mic') || trust.get('listen')) permissions.grant('microphone', { confirmed: true })
     server = createServer((req, res) => void handle(req, res))
     await new Promise((resolve, reject) => {
       server.once('error', reject)
@@ -292,6 +488,12 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     port = server.address().port
     await writeAtomic(infoFile, JSON.stringify({ pid: process.pid, port, token, startedAt, version: VERSION }))
     overlay.start({ url: url(), token, overlayKey })
+    pcStart = await autostart.isOn().catch(() => false)
+    void autostart.refresh().catch(() => {})
+    void keeper.begin({ delayMs: startedByPc ? PC_START_DELAY_MS : 0 }).catch(() => {})
+    routineTimer = setInterval(fireRoutines, ROUTINE_CHECK_MS)
+    routineTimer.unref?.()
+    maybeOffer()
     return { port, token, url: url() }
   }
 
@@ -300,9 +502,12 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
   const stop = async () => {
     if (isStopping) return
     isStopping = true
+    if (routineTimer) clearInterval(routineTimer)
     computer.stop({ reason: 'the companion stopped' })
     permissions.revokeAll()
     voice.stop()
+    cards.clear()
+    await keeper.shutdown().catch(() => {})
     overlay.stop()
     await new Promise(resolve => (server ? server.close(resolve) : resolve()))
     server?.closeAllConnections?.()
@@ -310,5 +515,5 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     onExit()
   }
 
-  return { start, stop, state, permissions, prompts, activity, computer, get token() { return token }, get overlayKey() { return overlayKey } }
+  return { start, stop, state, permissions, prompts, activity, computer, keeper, routines, trust, cards, get token() { return token }, get overlayKey() { return overlayKey } }
 }

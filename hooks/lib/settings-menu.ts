@@ -15,9 +15,14 @@ export async function editField($: Engine, field: Field, profileId: string): Pro
   let raw: string | undefined
 
   if (field.kind === 'text') {
-    const extra = field.id === 'notes' ? 'Clear notes' : ['panel-size', 'hotkey', 'computer-stop-key'].includes(field.id) ? 'Reset to default' : 'Cancel'
+    const extra = field.id === 'notes' ? 'Clear notes' : ['panel-size', 'hotkey', 'talk-key', 'look-key', 'computer-stop-key', 'assistant-model', 'voice-name'].includes(field.id) ? 'Reset to default' : 'Cancel'
     const hints: Record<string, string> = {
       hotkey: ' Type a shortcut like Ctrl+Alt+H, or "off", under "Other".',
+      'talk-key': ' Type a shortcut like Ctrl+Alt+Space, or "off", under "Other".',
+      'look-key': ' Type a shortcut like Ctrl+Alt+Q, or "off", under "Other".',
+      'voice-name': ' Type the name of a Windows voice, such as Microsoft Zira Desktop, under "Other".',
+      'voice-speed': ' Type a number from -5 to 5 (0 is normal) under "Other".',
+      'assistant-model': ' Type a model such as sonnet, opus or haiku under "Other".',
       'computer-stop-key': ' Type a key like Ctrl+Alt+Esc or Ctrl+Alt+Pause under "Other". It cannot be turned off.',
       'computer-blocked-apps': ' Type program names separated by commas (outlook, chrome) or "none" under "Other".',
       'computer-limits': ' Type steps and minutes, like "150 20", under "Other".',

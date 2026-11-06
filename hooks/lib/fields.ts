@@ -16,18 +16,24 @@ import {
   CONTROL_LEVELS,
   CONTROL_MINUTES_RANGE,
   DEFAULT_HOTKEY,
+  DEFAULT_LOOK_KEY,
   DEFAULT_STOP_KEY,
+  DEFAULT_TALK_KEY,
   IDLE_STYLES,
   MODEL_LABELS,
+  modelName,
   PANEL_REPLY_RANGE,
   PANEL_WIDTH_RANGE,
   parseHotkey,
+  SESSION_PERMISSIONS,
   SIZES,
   SKINS,
+  SPEAK_MODES,
   SPEEDS,
   STARTUP_MODES,
   THEMES,
   TONES,
+  VOICE_RATE_RANGE,
   type Config,
   type Profile,
   type ProfilePatch,
@@ -47,6 +53,7 @@ export type GroupId =
   | 'display'
   | 'shortcut'
   | 'computer'
+  | 'assistant'
   | 'personality'
 
 export const GROUPS: { id: GroupId; label: string }[] = [
@@ -59,8 +66,9 @@ export const GROUPS: { id: GroupId; label: string }[] = [
   { id: 'notifications', label: 'Notifications' },
   { id: 'startup', label: 'Startup' },
   { id: 'display', label: 'Model label' },
-  { id: 'shortcut', label: 'Hide/show shortcut' },
+  { id: 'shortcut', label: 'Shortcuts' },
   { id: 'computer', label: 'Computer control' },
+  { id: 'assistant', label: 'Always-on assistant' },
   { id: 'personality', label: 'Personality' },
 ]
 
@@ -227,8 +235,36 @@ export const FIELDS: Field[] = [
   },
   boolField('grow-replies', 'size-position', 'Grow the panel for long replies', (_c, p) => p.panel.autoFit, { scope: 'profile', patch: autoFit => ({ panel: { autoFit } }) }),
   numberField('opacity', 'opacity', 'Opacity', [20, 100], ['100', '85', '70', '50'], (_c, p) => p.appearance.opacity, { scope: 'profile', patch: opacity => ({ appearance: { opacity } }) }),
-  boolField('voice', 'sound', 'Voice', c => c.sound.voice, { scope: 'global', patch: voice => ({ sound: { voice } }) }),
-  boolField('sound-effects', 'sound', 'Sound effects', c => c.sound.effects, { scope: 'global', patch: effects => ({ sound: { effects } }) }),
+  choiceField('speak-replies', 'sound', 'Say replies aloud', SPEAK_MODES, c => c.live.speak, { scope: 'global', patch: speak => ({ live: { speak } }) }),
+  boolField('follow-up', 'sound', 'Keep listening for a moment after a reply', c => c.live.followUp, { scope: 'global', patch: followUp => ({ live: { followUp } }) }),
+  boolField('review-voice', 'sound', 'Check what was heard before it is sent', c => c.live.review, { scope: 'global', patch: review => ({ live: { review } }) }),
+  {
+    id: 'voice-name',
+    group: 'sound',
+    label: 'Voice',
+    scope: 'global',
+    kind: 'text',
+    show: c => c.live.voice || "(Windows' default)",
+    apply: (config, profileId, raw) => {
+      const word = raw.trim()
+      const voice = ['reset', 'default', 'none'].includes(word.toLowerCase()) ? '' : word
+      return send(config, profileId, { scope: 'global', patch: () => ({ live: { voice } }) }, voice)
+    },
+  },
+  {
+    id: 'voice-speed',
+    group: 'sound',
+    label: 'Speaking speed',
+    scope: 'global',
+    kind: 'text',
+    show: c => String(c.live.rate),
+    apply: (config, profileId, raw) => {
+      const rate = Number(raw.trim())
+      if (!Number.isInteger(rate) || rate < VOICE_RATE_RANGE[0] || rate > VOICE_RATE_RANGE[1]) return { error: `The speaking speed is a whole number from ${VOICE_RATE_RANGE[0]} to ${VOICE_RATE_RANGE[1]}; 0 is normal.` }
+      return send(config, profileId, { scope: 'global', patch: () => ({ live: { rate } }) }, rate)
+    },
+  },
+  boolField('sound-effects', 'sound', 'Chime when the bot hears its name', c => c.sound.effects, { scope: 'global', patch: effects => ({ sound: { effects } }) }),
   numberField('volume', 'sound', 'Volume', [0, 100], ['0', '25', '50', '75'], c => c.sound.volume, { scope: 'global', patch: volume => ({ sound: { volume } }) }),
   boolField('notifications', 'notifications', 'Notifications', c => c.notifications.enabled, { scope: 'global', patch: enabled => ({ notifications: { enabled } }) }),
   boolField('notify-turn-complete', 'notifications', 'Notify when a turn finishes', c => c.notifications.onTurnComplete, { scope: 'global', patch: onTurnComplete => ({ notifications: { onTurnComplete } }) }),
@@ -252,6 +288,47 @@ export const FIELDS: Field[] = [
       return send(config, profileId, { scope: 'global', patch: () => ({ hotkey: { toggle } }) }, toggle)
     },
   },
+  {
+    id: 'talk-key',
+    group: 'shortcut',
+    label: 'Talk key',
+    scope: 'global',
+    kind: 'text',
+    show: c => c.hotkey.talk,
+    apply: (config, profileId, raw) => {
+      const word = raw.trim().toLowerCase()
+      const talk = word === 'reset' || word === 'default' ? DEFAULT_TALK_KEY : raw.trim()
+      return send(config, profileId, { scope: 'global', patch: () => ({ hotkey: { talk } }) }, talk)
+    },
+  },
+  {
+    id: 'look-key',
+    group: 'shortcut',
+    label: 'Key that shows Claude the window in front',
+    scope: 'global',
+    kind: 'text',
+    show: c => c.hotkey.look,
+    apply: (config, profileId, raw) => {
+      const word = raw.trim().toLowerCase()
+      const look = word === 'reset' || word === 'default' ? DEFAULT_LOOK_KEY : raw.trim()
+      return send(config, profileId, { scope: 'global', patch: () => ({ hotkey: { look } }) }, look)
+    },
+  },
+  {
+    id: 'assistant-model',
+    group: 'assistant',
+    label: "The model of Mini's own session",
+    scope: 'global',
+    kind: 'text',
+    show: c => c.assistant.model || "(Claude Code's default)",
+    apply: (config, profileId, raw) => {
+      const word = raw.trim()
+      const model = ['default', 'reset', 'none'].includes(word.toLowerCase()) ? '' : word
+      if (model !== '' && modelName(model) === null) return { error: 'The model is a name Claude Code knows, such as sonnet, opus or haiku, or "default".' }
+      return send(config, profileId, { scope: 'global', patch: () => ({ assistant: { model } }) }, model)
+    },
+  },
+  choiceField('assistant-permissions', 'assistant', "The permission mode of Mini's own session", SESSION_PERMISSIONS, c => c.assistant.permissions, { scope: 'global', patch: permissions => ({ assistant: { permissions } }) }),
   choiceField('computer-level', 'computer', 'What Claude may do without asking', CONTROL_LEVELS, c => c.computer.level, { scope: 'global', patch: level => ({ computer: { level } }) }),
   {
     id: 'computer-stop-key',

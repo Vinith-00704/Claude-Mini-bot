@@ -50,6 +50,9 @@ namespace MiniBot
         /// <summary>Shows the marker on the spot a step is about to touch (the overlay draws it on its own thread).</summary>
         public Action<Point> Mark;
 
+        /// <summary>Points at a spot for the person: the spot, a few words, for how many seconds (the overlay draws it on its own thread).</summary>
+        public Action<Point, string, int> Pointed;
+
         /// <summary>True while the bot itself is sending input, and briefly after, so it is not taken for the person's.</summary>
         public static bool IsActing { get { return DateTime.UtcNow.Ticks < Interlocked.Read(ref actingUntil); } }
 
@@ -65,6 +68,9 @@ namespace MiniBot
                 case "look": return Look(args);
                 case "probe": return Probe(args);
                 case "act": return Act(args);
+                case "point":
+                    if (Pointed != null) Pointed(Target(args, "x", "y"), Json.Str(args, "label"), Json.Int(args, "seconds", 12));
+                    return new Dictionary<string, object>();
                 default: throw new StepException("unknown job " + kind);
             }
         }
@@ -481,7 +487,7 @@ namespace MiniBot
         /// <summary>The spot on the screen x and y (or element n) of the last picture stand for.</summary>
         Point Target(Dictionary<string, object> args, string xKey, string yKey)
         {
-            if (lookBounds.IsEmpty) throw new StepException("Look at the screen first (computer_look): positions are pixels in the last picture.");
+            if (lookBounds.IsEmpty) throw new StepException("Look at the screen first (computer_look or screen_look): positions are pixels in the last picture.");
             if (xKey == "x" && Json.Has(args, "element"))
             {
                 int n = Json.Int(args, "element");

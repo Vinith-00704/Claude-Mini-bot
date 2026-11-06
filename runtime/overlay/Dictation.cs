@@ -44,6 +44,8 @@ namespace MiniBot
 
         /// <summary>True while the person holds the key to talk: it listens until they let go, pauses and all.</summary>
         public bool Held { get { return continuous; } }
+        /// <summary>The talk key turned out to be held down: from now on only letting go ends it, pauses and all.</summary>
+        public bool HoldOpen { get { return continuous; } set { continuous = value; } }
         public bool UsesWhisper { get { return useWhisper; } }
         /// <summary>True while the microphone is open.</summary>
         public bool IsActive { get { return useWhisper ? (recorder != null && recorder.Running) : (engine != null && !Done); } }
@@ -226,7 +228,7 @@ namespace MiniBot
                 if (!whisper.WaitForExit(60000)) { try { whisper.Kill(); } catch (Exception) { } }
                 if (cancelled) return;
                 text = Clean(text);
-                if (text.Length > 0) Final = text;
+                if (text.Length > 0 && !IsOnlyNoise(text)) Final = text;
                 else Error = "I didn't catch that.";
             }
             catch (Exception e)
@@ -239,6 +241,55 @@ namespace MiniBot
                 Transcribing = false;
                 Done = true;
             }
+        }
+
+        /// <summary>
+        /// A short recording worked out on the spot, for the listener: the text heard, or "". The context is cut to the
+        /// length of the audio, which is most of what makes this quick enough to do for every sentence in a room.
+        /// </summary>
+        public static string Recognize(byte[] wav, string hint)
+        {
+            string model = ModelPath();
+            if (!File.Exists(WhisperExe) || model == null) return "";
+            string file = Path.Combine(Path.GetTempPath(), "minibot-listen-" + Guid.NewGuid().ToString("N") + ".wav");
+            try
+            {
+                File.WriteAllBytes(file, wav);
+                double seconds = Math.Max(0, wav.Length - 44) / 32000.0;
+                int context = Math.Min(1500, (int)(seconds * 50) + 150);
+                var info = new ProcessStartInfo
+                {
+                    FileName = WhisperExe,
+                    Arguments = "-m \"" + model + "\" -f \"" + file + "\" -nt -np -l en -t " + Math.Max(2, Math.Min(4, Environment.ProcessorCount / 2))
+                        + " -ac " + context + " --prompt \"" + hint.Replace("\"", "") + "\"",
+                    WorkingDirectory = SpeechDir,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    StandardOutputEncoding = Encoding.UTF8
+                };
+                using (var run = Process.Start(info))
+                {
+                    run.ErrorDataReceived += delegate { };
+                    run.BeginErrorReadLine();
+                    string text = run.StandardOutput.ReadToEnd();
+                    if (!run.WaitForExit(30000)) { try { run.Kill(); } catch (Exception) { } }
+                    text = Clean(text);
+                    return IsOnlyNoise(text) ? "" : text;
+                }
+            }
+            finally
+            {
+                try { File.Delete(file); } catch (Exception) { }
+            }
+        }
+
+        /// <summary>What Whisper writes for a silence or a noise when it has nothing better.</summary>
+        static bool IsOnlyNoise(string text)
+        {
+            string plain = Regex.Replace(text.ToLowerInvariant(), @"[^a-z ]", "").Trim();
+            return plain.Length == 0 || plain == "you" || plain == "thank you for watching" || plain == "bye" && text.Length <= 4;
         }
 
         /// <summary>Whisper marks non-speech like [BLANK_AUDIO] or (music); that is not something to type.</summary>

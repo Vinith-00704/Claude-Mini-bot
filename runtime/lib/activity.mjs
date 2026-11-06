@@ -10,7 +10,7 @@ export const PHASES = ['idle', 'sending', 'thinking', 'working', 'completed', 'e
 // not look busy for ever. The response preview stays until the next prompt.
 const SETTLE_MS = 10_000
 const MAX_DETAIL = 120
-const MAX_PREVIEW = 1200
+const MAX_PREVIEW = 20000
 
 const fail = (status, error) => Object.assign(new Error(error), { status })
 
@@ -50,7 +50,8 @@ export class Voice {
   #state = { state: 'idle', error: null, heard: null }
 
   set({ state, error = null, heard = null } = {}) {
-    if (state !== 'idle' && state !== 'listening') throw fail(400, 'state is idle or listening')
+    // 'standby': the microphone is on and only the bot's name is being listened for.
+    if (state !== 'idle' && state !== 'listening' && state !== 'standby') throw fail(400, 'state is idle, listening or standby')
     this.#state = {
       state,
       error: typeof error === 'string' ? error.slice(0, 300) : null,

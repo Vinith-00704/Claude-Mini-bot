@@ -51,6 +51,8 @@ namespace MiniBot
         readonly List<Rectangle> edgeBounds = new List<Rectangle>();
         readonly SeeThroughWindow ring = new SeeThroughWindow();
         readonly Timer ringTimer = new Timer();
+        readonly SeeThroughWindow caption = new SeeThroughWindow();
+        readonly Label captionText = new Label();
         bool paused;
         Color accent = Color.FromArgb(215, 119, 87);
         static readonly Color Amber = Color.FromArgb(232, 170, 40);
@@ -60,6 +62,12 @@ namespace MiniBot
         {
             ring.Opacity = 0.9;
             ringTimer.Tick += delegate { ringTimer.Stop(); ring.Hide(); };
+            caption.Opacity = 0.96;
+            captionText.Dock = DockStyle.Fill;
+            captionText.ForeColor = Color.White;
+            captionText.TextAlign = ContentAlignment.MiddleCenter;
+            captionText.Font = Ui.Font(10f, FontStyle.Bold);
+            caption.Controls.Add(captionText);
         }
 
         public bool IsShown { get; private set; }
@@ -136,6 +144,26 @@ namespace MiniBot
         {
             ringTimer.Stop();
             if (ring.Visible) ring.Hide();
+            if (caption.Visible) caption.Hide();
+        }
+
+        /// <summary>A ring on the spot and a few words beside it, to show the person where. Stays until Unmark.</summary>
+        public void Point(Point at, string text, Color color)
+        {
+            accent = color;
+            Mark(at, true);
+            if (string.IsNullOrEmpty(text)) { if (caption.Visible) caption.Hide(); return; }
+            var size = TextRenderer.MeasureText(text, captionText.Font, new Size(Ui.Px(360), 0), TextFormatFlags.WordBreak);
+            int w = size.Width + Ui.Px(24), h = size.Height + Ui.Px(14);
+            var work = Screen.FromPoint(at).WorkingArea;
+            int x = at.X + Ui.Px(30), y = at.Y - h / 2;
+            if (x + w > work.Right) x = at.X - Ui.Px(30) - w;
+            y = Math.Max(work.Top, Math.Min(y, work.Bottom - h));
+            captionText.Text = text;
+            caption.BackColor = captionText.BackColor = color;
+            // Sized once shown: a window made with its size given first is held to a dozen pixels or more.
+            if (!caption.Visible) caption.Show();
+            caption.Bounds = new Rectangle(x, y, w, h);
         }
 
         public void Dispose()
@@ -143,6 +171,7 @@ namespace MiniBot
             ringTimer.Dispose();
             foreach (var e in edges) e.Dispose();
             ring.Dispose();
+            caption.Dispose();
         }
     }
 }

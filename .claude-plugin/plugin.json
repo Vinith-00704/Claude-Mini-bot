@@ -1,8 +1,8 @@
 {
   "name": "mini-bot",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "license": "MIT",
   "author": { "name": "Vinith-00704" },
   "repository": "https://github.com/Vinith-00704/Claude-Mini-bot",
-  "description": "/mini-bot: hide, settings, permissions, bot profiles, start/stop and computer control for the floating Mini Bot companion"
+  "description": "/mini-bot: an always-on floating assistant on your Claude Code session: live talking, starting with your PC, computer control, routines, hide, settings, permissions and bot profiles"
 }

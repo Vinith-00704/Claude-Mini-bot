@@ -12,6 +12,12 @@
 // ends when Claude says it is done, when the turn ends, when the person stops it
 // (the bot, the stop key, the tray), when access is revoked, after a few idle
 // minutes, or when the companion stops. Whatever ended it, nothing carries over.
+//
+// The person can also give full access, once, in the bot (trust.mjs): then a task
+// starts without the question, in any app, and no step is asked about. They still
+// see it (the frame and the bar), can take over and stop it, and it is all logged.
+// What no setting unlocks stays locked: ALWAYS_BLOCKED, password fields, card
+// numbers, administrator windows, and the shortcuts that act on Windows itself.
 
 import { appName, CONTROL_LEVELS } from '../../shared/config.mjs'
 
@@ -51,6 +57,7 @@ const KEY_NAMES = new Set([
 const KEY_ALIASES = { return: 'enter', escape: 'esc', del: 'delete', ins: 'insert', pgup: 'pageup', pgdn: 'pagedown', apps: 'menu' }
 const MODS = { ctrl: 'Ctrl', control: 'Ctrl', alt: 'Alt', shift: 'Shift', win: 'Win', windows: 'Win' }
 
+const ANY_APP = 'any app'
 const GRANT_WAIT_MS = 2 * 60 * 1000
 const CONFIRM_WAIT_MS = 2 * 60 * 1000
 const PAUSE_WAIT_MS = 5 * 60 * 1000
@@ -197,6 +204,7 @@ export class Computer {
   #permissions
   #activity
   #config
+  #isFull
   #isOverlayAttached
   #log
   #timers
@@ -211,11 +219,12 @@ export class Computer {
   #queue = Promise.resolve()
   #idleTimer = null
 
-  constructor({ now = Date.now, permissions, activity, config, isOverlayAttached = () => true, log = () => {}, timers = { set: setTimeout, clear: clearTimeout } }) {
+  constructor({ now = Date.now, permissions, activity, config, isFull = () => false, isOverlayAttached = () => true, log = () => {}, timers = { set: setTimeout, clear: clearTimeout } }) {
     this.#now = now
     this.#permissions = permissions
     this.#activity = activity
     this.#config = config
+    this.#isFull = isFull
     this.#isOverlayAttached = isOverlayAttached
     this.#log = log
     this.#timers = timers
@@ -364,9 +373,10 @@ export class Computer {
   async #grant(task, apps) {
     if (this.#session) {
       const same = this.#session.task === task && apps.every(a => this.#session.apps.includes(a))
-      if (same) return { ok: true, granted: true, level: this.#session.level, apps: this.#session.apps, note: 'Control was already granted for this task.' }
+      if (same || this.#session.full) return { ok: true, granted: true, level: this.#session.level, apps: this.#session.full ? [ANY_APP] : this.#session.apps, note: 'Control was already granted for this task.' }
       return { ok: false, granted: false, error: 'Control is already granted for another task. Call computer_stop first.' }
     }
+    if (this.#isFull()) return this.#begin(task, apps, 'free', true)
     const config = this.#config()
     const first = config.computer.level
     const second = first === 'step' ? 'important' : 'step'
@@ -387,14 +397,18 @@ export class Computer {
       }[choice] ?? 'The person said no. Do not try to control the computer for this; ask how they want to go on.'
       return { ok: false, granted: false, error }
     }
+    return this.#begin(task, apps, choice, false)
+  }
+
+  #begin(task, apps, level, full) {
+    const config = this.#config()
     this.#permissions.grant('computer', { confirmed: true })
     this.#permissions.startCapture('computer')
-    const at = this.#now()
-    this.#session = { id: this.#id('s'), task, apps, level: choice, status: 'running', startedAt: at, actions: 0, actionLimit: config.computer.maxActions, timeLimitMs: config.computer.maxMinutes * 60000 }
+    this.#session = { id: this.#id('s'), task, apps, full, level, status: 'running', startedAt: this.#now(), actions: 0, actionLimit: config.computer.maxActions, timeLimitMs: config.computer.maxMinutes * 60000 }
     this.#touch()
     this.#activity.set({ phase: 'working', id: null, detail: 'Using your PC', source: 'claude' })
-    this.#log({ kind: 'start', task, apps, level: choice })
-    return { ok: true, granted: true, level: choice, apps }
+    this.#log({ kind: 'start', task, apps, level, full })
+    return { ok: true, granted: true, level, apps: full ? [ANY_APP] : apps }
   }
 
   #touch() {
@@ -421,6 +435,7 @@ export class Computer {
   /** At the action or time limit the person decides whether it goes on. */
   async #withinLimits() {
     const s = this.#session
+    if (s.full) return null
     const overActions = s.actions >= s.actionLimit
     const overTime = this.#now() - s.startedAt >= s.timeLimitMs
     if (!overActions && !overTime) return null
@@ -447,7 +462,7 @@ export class Computer {
     if (ALWAYS_BLOCKED.includes(name)) return `${w.process} is never controlled (Claude Code runs there, or it guards passwords, security or the system)`
     if (this.#config().computer.blockedApps.includes(name)) return `the person blocked ${w.process}`
     if (w.elevated) return `${w.process} runs as administrator; Windows does not let other programs operate it, and the bot never asks for administrator rights`
-    if (!this.#session.apps.includes(name)) return `${name} is not one of the apps allowed for this task (${this.#session.apps.join(', ')}). If you need it, call computer_stop and ask again with it listed`
+    if (!this.#session.full && !this.#session.apps.includes(name)) return `${name} is not one of the apps allowed for this task (${this.#session.apps.join(', ')}). If you need it, call computer_stop and ask again with it listed`
     if (probe.toWindow && probe.toWindow.pid !== w.pid) return 'a drag may not end in another program'
     if (step.action === 'type' && probe.element?.isPassword) return 'that is a password field. Ask the person to type it themselves'
     if (step.action === 'type' && looksLikeCard(step.text)) return 'that looks like a card number. Ask the person to type it themselves'
@@ -463,6 +478,53 @@ export class Computer {
     if (step.action === 'keys' && IMPORTANT_KEYS.has(step.keys)) return true
     if (step.action === 'type') return false
     return IMPORTANT_WORDS.test(probe?.element?.name ?? '') || IMPORTANT_WORDS.test(step.why)
+  }
+
+  /**
+   * Claude asks to see the screen without controlling anything. With full access it just looks; otherwise the person
+   * says yes for this one look. The access indicator shows while the picture is taken, whichever it is.
+   */
+  screenLook(body) {
+    const look = checkLook(body)
+    if (!this.#isOverlayAttached()) throw fail(409, 'the bot\'s window is not running: /mini-bot start')
+    return this.#ticket(this.#serial(async () => {
+      if (!this.#isFull() && !this.#session) {
+        const choice = await this.#ask('screen', 'Claude wants to see your screen, to answer you. Just this one look; nothing is clicked or typed.', [
+          { id: 'allow', label: 'Show Claude my screen', primary: true },
+          { id: 'deny', label: 'Not now' },
+        ], {}, GRANT_WAIT_MS)
+        if (choice !== 'allow') {
+          this.#log({ kind: 'denied', task: 'a look at the screen', apps: [], why: choice === 'timeout' ? 'no answer' : 'the person said no' })
+          return { ok: false, error: choice === 'timeout' ? 'The person did not answer.' : 'The person said no. Ask them to describe it, or to attach a screenshot.' }
+        }
+      }
+      const held = this.#permissions.snapshot().screen.granted
+      this.#permissions.grant('screen', { confirmed: true })
+      this.#permissions.startCapture('screen')
+      try {
+        const seen = await this.#job('look', look)
+        this.#log({ kind: 'looked' })
+        return { ok: true, ...seen }
+      } finally {
+        this.#permissions.stopCapture('screen')
+        if (!held) this.#permissions.revoke('screen')
+      }
+    }))
+  }
+
+  /** Claude points at something on the screen, to show the person how. It only draws: nothing is clicked. */
+  point(body) {
+    const s = typeof body === 'object' && body !== null ? body : {}
+    const args = {}
+    if (int(s.element, 1, 500)) args.element = s.element
+    else if (int(s.x, 0, 20000) && int(s.y, 0, 20000)) Object.assign(args, { x: s.x, y: s.y })
+    else throw fail(400, 'give x and y (pixels in the last picture) or element (a number from the last list)')
+    const label = typeof s.label === 'string' ? s.label.replace(/\s+/g, ' ').trim().slice(0, 120) : ''
+    if (!printable(label)) throw fail(400, 'label is a few words')
+    args.label = label
+    args.seconds = typeof s.seconds === 'number' && s.seconds >= 1 && s.seconds <= 60 ? Math.round(s.seconds) : 12
+    if (!this.#isOverlayAttached()) throw fail(409, 'the bot\'s window is not running: /mini-bot start')
+    return this.#ticket(this.#serial(async () => ({ ok: true, ...(await this.#job('point', args)) })))
   }
 
   /** Claude asks to see the screen. */
@@ -580,6 +642,7 @@ export class Computer {
       status: s ? s.status : q?.kind === 'grant' ? 'asking' : 'off',
       task: s?.task ?? null,
       apps: s?.apps ?? [],
+      full: s?.full === true,
       level: s?.level ?? null,
       actions: s?.actions ?? 0,
       elapsedMs: s ? this.#now() - s.startedAt : 0,

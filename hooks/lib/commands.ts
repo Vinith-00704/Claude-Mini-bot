@@ -2,6 +2,7 @@
 // everything the menu does can also be typed, which is also what works where
 // no one can answer a dialog.
 
+import { assistantCommand, autostartCommand, fullAccessCommand, listenCommand, routinesCommand, addRoutineCommand, describeAssistant } from './assistant'
 import { botMenu, createBot } from './bot-menu'
 import { isRuntimeOutdated } from './bridge'
 import { connect, getState, request } from './client'
@@ -28,7 +29,14 @@ const HELP = `Mini Bot: your floating character. Claude Code stays the intellige
 
   /mini-bot                         open the menu
   /mini-bot hide | show | toggle    hide or restore the character (Claude Code stays connected)
-  /mini-bot start | stop            start or stop the companion only
+  /mini-bot on | off                turn Mini on, or off until you turn it on or the PC restarts (start and stop mean the same)
+  /mini-bot autostart [on|off]      whether Mini starts with your PC
+  /mini-bot assistant [on|off|restart|show]  Mini's own Claude Code session in the background
+  /mini-bot listen [on|off]         listen for the bot's name ("Hey Mini")
+  /mini-bot full-access [on|off]    let Claude use your mouse and keyboard in any app without asking
+  /mini-bot routines [remove <n>]   your reminders and routines
+  /mini-bot remind "<when>" <text>  a reminder, e.g. remind "in 20 minutes" stretch
+  /mini-bot routine "<when>" <text> a prompt for Claude at a time, e.g. routine "daily 09:00" brief me
   /mini-bot status                  what is running, which bot, what access is in use
   /mini-bot settings [list]         change settings in a menu, or list them
   /mini-bot set <field> <value>     e.g. set opacity 70, set skin ocean, set position bottom-left, set panel-size 520x300
@@ -65,6 +73,7 @@ async function describeStatus($: Engine): Promise<string> {
           : `Hide/show shortcut: ${config.hotkey.toggle} (/mini-bot set hotkey changes it).`,
     )
   }
+  lines.push(...describeAssistant(state))
   const control = state?.computer
   if (control && control.status !== 'off') {
     lines.push(
@@ -214,9 +223,29 @@ export async function runCommand($: Engine, input: string): Promise<string> {
       case 'log':
         return controlLog($)
       case 'start':
+      case 'on':
         return (await startRuntime($)).message
       case 'stop':
+      case 'off':
         return (await stopRuntime($)).message
+      case 'autostart':
+      case 'pc-start':
+        return autostartCommand($, args)
+      case 'assistant':
+      case 'session':
+        return assistantCommand($, args)
+      case 'listen':
+      case 'wake':
+        return listenCommand($, args)
+      case 'full-access':
+      case 'fullaccess':
+        return fullAccessCommand($, args)
+      case 'routines':
+        return routinesCommand($, args)
+      case 'remind':
+        return addRoutineCommand($, 'say', args)
+      case 'routine':
+        return addRoutineCommand($, 'ask', args)
       case 'settings':
         if (args[0] === 'list') return listSettings($)
         await settingsMenu($)

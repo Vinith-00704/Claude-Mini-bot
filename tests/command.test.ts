@@ -84,6 +84,8 @@ const world = async ($: any, on: any, options: Options) => {
     commands.push(e.argv ?? e.command ?? e.args)
     return { value: { exitCode: 1, stdout: '', stderr: '' } }
   })
+  on('session.id', () => ({ value: 'session-1' }))
+  on('session.cwd', () => ({ value: 'F:/project' }))
   on('session.model', () => ({ value: sessionModel }))
   // The bottom of a model request: nothing is asked of a model in a test.
   on('turn.step', async function* (_: any, e: any) {
@@ -223,7 +225,7 @@ test('revoking needs no approval and ends the access', async ($, on) => {
 
 test('stop asks only the companion to shut down', async ($, on) => {
   const { run, requests } = await world($, on, { running: true })
-  expect(await run('stop')).toMatch(/Mini Bot stopped.*Claude Code is untouched/)
+  expect(await run('stop')).toMatch(/Mini Bot stopped.*your other Claude Code sessions are untouched/)
   const paths = requests.map(r => r.path)
   expect(paths.filter(p => p === '/v1/shutdown')).toHaveLength(1)
   expect(paths.every(p => p.startsWith('/v1/') && !p.includes('/permissions/') && p !== '/v1/visibility')).toBe(true)
@@ -267,7 +269,7 @@ test('deleting a bot needs confirmation, and without it the bot stays', async ($
 
 test('an unknown subcommand shows the help', async ($, on) => {
   const { run } = await world($, on, { running: true })
-  expect(await run('dance')).toMatch(/Unknown option "dance"[\s\S]*\/mini-bot start \| stop[\s\S]*floating bot works without these/)
+  expect(await run('dance')).toMatch(/Unknown option "dance"[\s\S]*\/mini-bot on \| off[\s\S]*floating bot works without these/)
 })
 
 test('the menu shows the five choices in order, never more than four options at a time', async ($, on) => {
@@ -355,7 +357,7 @@ test('spoken words and prompts with attachments never run a command', async ($, 
   await tick()
   expect(ran).toEqual([])
   expect(activity().filter(a => a.phase === 'error').map(a => a.id).sort()).toEqual(['c7', 'c8'])
-  expect(submitted.map(s => s.text)).toEqual(['what does /cost do?'])
+  expect(submitted.map(s => s.text.split('\n')[0])).toEqual(['what does /cost do?'])
 })
 
 test('the bot is told which commands exist, for its / list, without the ones it refuses', async ($, on) => {
@@ -612,7 +614,7 @@ test('/mini-bot update still gives the commands when GitHub cannot be reached', 
 // ---- the model and effort the session runs on ----
 
 const sessionPosts = (requests: { method: string; path: string; body: any }[]) =>
-  requests.filter(r => r.path === '/v1/session').map(r => r.body)
+  requests.filter(r => r.path === '/v1/session').map(({ body: { session: _session, ...body } }) => body)
 
 const step = async ($: any, input: Record<string, unknown>) => {
   for await (const _ of $.turn.step({ turnId: 't1', index: 0, messageCount: 1, ...input })) void _
@@ -673,7 +675,7 @@ test('/mini-bot set hotkey changes the shortcut, tells the companion, and shows 
   expect(await run('status')).toMatch(/Hide\/show shortcut: Ctrl\+Alt\+B/)
   expect(await run('set hotkey shift+a')).toMatch(/Ctrl, Alt or Win/)
   expect(await run('set hotkey ctrl+alt+h')).toMatch(/now Ctrl\+Alt\+H/)
-  expect(requests.filter(r => r.path === '/v1/config').at(-1)?.body.hotkey).toEqual({ toggle: 'Ctrl+Alt+H' })
+  expect(requests.filter(r => r.path === '/v1/config').at(-1)?.body.hotkey.toggle).toBe('Ctrl+Alt+H')
   expect(config().hotkey.toggle).toBe('Ctrl+Alt+H')
   expect(await run('status')).toMatch(/Hide\/show shortcut: Ctrl\+Alt\+H/)
   expect(await run('set hotkey off')).toMatch(/now off/)

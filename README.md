@@ -1,14 +1,15 @@
 # Claude Mini Bot
 
-A small floating character for Claude Code on Windows. **Claude Code stays the intelligence; Mini Bot is the character you talk through.** It is not a second assistant: what you type or say into it is submitted to your Claude Code session as an ordinary prompt, under Claude Code's own permissions.
+A small floating character for Claude Code on Windows. **Claude Code stays the intelligence; Mini Bot is the character you talk through.** It is not a second assistant: what you type or say into it is submitted to a Claude Code session as an ordinary prompt, under Claude Code's own permissions. That can be the terminal you are working in, or a session of its own that it keeps running in the background.
 
 The default bot is **Clawd**, Claude Code's own mascot, drawn as the flat pixel art it is in the terminal, and the panel, colours and motion follow Claude Code's own theme. You name the bot yourself ("Mini" is only the default), keep several bots, and change how each one looks.
 
 - Click it, type a prompt, press Enter. Or hold Space and talk.
+- Or leave it on: it can start with your PC, keep its own Claude Code session running, listen for "Hey Mini", talk back, and turn on and off whenever you say.
 - Snip any part of the screen and ask Claude about it.
 - Let Claude use your mouse and keyboard for a task, in the apps you allow, while you watch: move the mouse to take over, Ctrl+Alt+Esc to stop.
 - Hide it, move it, restyle it, keep several bots. Claude Code is never interrupted.
-- Nothing is listened to or captured until you say yes, and a red indicator is always shown while it is.
+- Nothing is listened to or captured until you say yes, and an indicator is always shown while it is.
 
 ## Install
 
@@ -94,7 +95,7 @@ Your bots and settings stay in `%APPDATA%\ClaudeMiniBot`, and the optional speec
 | **Hold Space** in the prompt | talk instead of typing |
 | The **snip** button | screenshot part of the screen and ask about it |
 | **Drop files** on the bot | have Claude look at them (see below) |
-| **Right-click** the bot | hide, customize, change bot, permissions, stop |
+| **Right-click** the bot | hide, customize, change bot, assistant, permissions, turn off |
 | `/mini-bot help` | every command |
 
 ## Claude Code's look and motion
@@ -112,7 +113,7 @@ Taken from the app itself, not imitated:
 | --- | --- |
 | **Click** the bot | open or close its small panel |
 | **Drag** the bot | move it (its position is saved with that bot; it stays on screen) |
-| **Right-click** the bot | Hide, Customize, Change bot, Permissions, Stop |
+| **Right-click** the bot | Hide, Customize, Change bot, Assistant, Permissions, Turn off |
 | Type in the panel, **Enter** or the send button | send a prompt to Claude Code (**Shift+Enter** adds a line; the prompt grows up to six lines, then scrolls) |
 | **Drag** the panel's far edges or corner (the ones away from the bot) | resize the panel; the reply area takes the extra room. It is saved with that bot. **Double-click** an edge to reset |
 | The **arrows** button in the panel, or double-click its top | switch between the usual size and a large view (up to 60% of the screen's height) |
@@ -177,15 +178,41 @@ Under the panel's header a thin line shows what your Claude Code session is runn
 - Only one program can own a combination. If another program already has it, the tray icon shows a warning, `/mini-bot status` says the shortcut does not work, and the fix is to pick another with `set hotkey`.
 - It works while the companion runs; `/mini-bot stop` releases it.
 
+### An always-on assistant: live talking, from the moment your PC starts
+
+Mini can be on all the time, with Claude Code still the only intelligence: it runs on a real Claude Code session, with no separate app and nothing else talking to a model. The first time the bot starts it offers to set this up in one click, and each part can be turned on or off by itself (right-click the bot > **Assistant**, or the commands below).
+
+- **It starts with your PC.** `/mini-bot autostart on` adds it to your Windows startup list (Settings > Apps > Startup shows it too), and to the Start menu. The bot comes up at once, and its session a little later, once the rush at sign-in has passed.
+- **It runs on its own Claude Code session.** `/mini-bot assistant on` keeps a session running in a window you don't see, so the bot works with no terminal open. It runs in `%APPDATA%\ClaudeMiniBot\home`, across your whole PC. It costs nothing while idle except about 400 MB of memory; each thing you ask uses your Claude plan as usual. The first time, its window opens so you can say yes to Claude Code's question about that folder, then hides again. Right-click the bot > Assistant > **Show Claude's window** to see it any time.
+- **On and off.** `/mini-bot off`, or **Turn Mini off** in the bot's or tray icon's menu, closes the bot and its own session, and the microphone with them. Your other Claude Code sessions are never touched. It stays off until you turn it on: `/mini-bot on` in any session, **Claude Mini Bot** in the Start menu, or your PC restarting (if it starts with your PC). A new Claude Code session does not bring it back by itself.
+- **Which session it talks to.** The Claude Code terminal you are working in, while you are using it; otherwise its own session. The panel shows which, and right-click > Assistant > **Talk to** lets you choose.
+- **What Claude Code would ask.** Nobody sits at the hidden session's terminal, so when Claude Code asks permission for something there, the question comes up in the bot, and only your click answers it. The session runs in Claude Code's auto mode, which decides most things itself and refuses what looks dangerous; `/mini-bot set assistant-permissions manual` makes it ask about more. Skipping permission checks altogether is not an option here.
+
+**Talking to it, live:**
+
+- **"Hey Mini."** `/mini-bot listen on` asks you in the bot, and then it listens for its name all the time: say "Hey Mini, open my downloads folder" in one breath, or "Hey Mini", wait for the chime, and go on. It uses the bot's own name if you renamed it. This needs offline Whisper (`/mini-bot speech install`).
+- **The talk key.** **Ctrl+Alt+Space** from any program: tap it and talk until you pause, or hold it and talk until you let go. It needs no name and leaves the microphone closed the rest of the time. Press it while the bot is talking to interrupt it.
+- **Replies are said aloud** when you spoke (`/mini-bot set speak-replies always` or `off` to change that), with a Windows voice on this PC. Long replies are cut short with "the rest is in the panel". Afterwards it listens for a few seconds without needing its name, so you can just carry on (`set follow-up off` turns that off).
+- **What's this?** **Ctrl+Alt+Q** puts a picture of the window in front on your next prompt, and listens for your question. Claude can also ask to look with `screen_look` when you ask about what's on your screen; unless you gave full access, it asks in the bot, for that one look.
+- **Spoken commands the bot does itself**, at once and only when the whole sentence is the command: "stop" or "cancel" (stops what Claude is doing), "stop talking", "hide", "show yourself", "stop listening", "turn yourself off", "thanks" or "that's all" (ends the conversation). Everything else goes to Claude as an ordinary prompt. A spoken sentence never runs a slash command.
+- **Listening is private and visible.** The audio stays on this PC: each stretch of speech goes through Whisper here, to see whether it starts with the name, and is thrown away. Only what you say to the bot goes to Claude, as text. A small mark at the top of your screen says so the whole time, even with the bot hidden, and clicking it stops listening. It stops by itself while the PC is locked. Spoken prompts go straight to Claude; `/mini-bot set review-voice on` makes them wait in the prompt for you to check. Speech in the prompt itself (hold Space, the mic button) always waits for you.
+
+**Full access.** `/mini-bot full-access on` asks you in the bot; once you say yes, Claude uses the mouse and keyboard in any app without asking first or asking about each step, including sending and deleting, until you turn it off. You still see it (the frame and the bar), moving the mouse still pauses it, Ctrl+Alt+Esc still stops it, and every step is still logged. Nothing but your own click in the bot can turn it on. It does not unlock the hard limits below: terminals and code editors (Claude Code runs there, so it could approve its own prompts), password managers, sign-in and security screens, administrator windows, password fields, card numbers, and Windows-key shortcuts stay out of reach. It only covers the mouse and keyboard: Claude Code's own permission rules still apply to everything else.
+
+**Routines and reminders.** Say "remind me at five to call the bank" or "every weekday at nine, tell me what's in my calendar". A reminder is only words the bot says. A routine gives Claude a prompt at that time, on its own session, and takes your yes in the bot before it is added. `/mini-bot routines` lists them, and they only fire while the bot is on.
+
+**Show me how.** Ask Claude to show you rather than do it: `show_on_screen` puts a ring and a few words on the spot, and the character goes there. It clicks nothing.
+
+**How it behaves.** `%APPDATA%\ClaudeMiniBot\home\CLAUDE.md` is the session's instructions: it is written once and then yours to edit. What Claude learns about you goes in Claude Code's own memory for that folder, which you can read and change.
+
 ### Computer control: Claude uses your mouse and keyboard
 
-Ask Claude to do something on your PC that needs the mouse and keyboard ("in the Excel sheet that's open, add a bar chart of column B", "turn on dark mode in Settings") and it can do it on your screen, step by step, where you watch it. Everything stays under your permission, at several levels:
+Ask Claude to do something on your PC that needs the mouse and keyboard ("in the Excel sheet that's open, add a bar chart of column B", "turn on dark mode in Settings") and it can do it on your screen, step by step, where you watch it. These tools are served by the plugin, so Claude Code's own permission prompt does not come up for them: the answers below, in the bot, are the permission. Everything stays under your permission, at several levels:
 
-1. **Claude Code's own permission prompt.** The four tools (`computer_start`, `computer_look`, `computer_act`, `computer_stop`) ask the first time, like any tool.
-2. **Your yes in the bot, for this one task.** Claude says what it will do and which apps it needs; the bot shows it, and you choose **Allow, ask me each step**, **Allow, ask before important steps**, or **Deny**. Nothing is granted ahead, and the grant ends with the task.
-3. **Only the apps you allowed.** A click or a key press anywhere else is refused (Claude must ask again with that app listed). Some programs can never be controlled, whatever you allow: terminals and code editors (where Claude Code itself runs, so it can never answer its own permission prompts), password managers, Windows Security, Task Manager, the Registry and other system tools, and anything running as administrator.
-4. **Steps you approve.** At "ask me each step" every step waits for **Allow / Skip / Stop** in the bot, with a ring on the spot it will touch. At "ask before important steps" only steps that send, delete, buy, pay, submit, install or close (and anything Claude marks as important) wait for you.
-5. **Hard limits no setting removes.** It never types into password fields or types something that looks like a card number (it asks you to), never sends Windows-key shortcuts, Ctrl+Alt shortcuts, Alt+Tab or the bot's own keys, and after 150 steps or 20 minutes it stops and asks whether to go on.
+1. **Your yes in the bot, for this one task.** Claude says what it will do and which apps it needs; the bot shows it, and you choose **Allow, ask me each step**, **Allow, ask before important steps**, or **Deny**. Nothing is granted ahead, and the grant ends with the task.
+2. **Only the apps you allowed.** A click or a key press anywhere else is refused (Claude must ask again with that app listed). Some programs can never be controlled, whatever you allow: terminals and code editors (where Claude Code itself runs, so it can never answer its own permission prompts), password managers, Windows Security, Task Manager, the Registry and other system tools, and anything running as administrator.
+3. **Steps you approve.** At "ask me each step" every step waits for **Allow / Skip / Stop** in the bot, with a ring on the spot it will touch. At "ask before important steps" only steps that send, delete, buy, pay, submit, install or close (and anything Claude marks as important) wait for you.
+4. **Hard limits no setting removes.** It never types into password fields or types something that looks like a card number (it asks you to), never sends Windows-key shortcuts, Ctrl+Alt shortcuts, Alt+Tab or the bot's own keys, and after 150 steps or 20 minutes it stops and asks whether to go on.
 
 While Claude has control you can see it: an orange frame around every monitor, and a red bar at the top saying how to take over and how to stop. **Move the mouse or press any key and it pauses at once**: the frame turns amber, Claude waits, and the bot offers **Give control back** or **Stop**. **Ctrl+Alt+Esc**, a click on the bar, the bot's right-click menu, the tray icon or `/mini-bot control stop` end it at once. It also ends when Claude says it is done, when its turn ends or is interrupted, when you lock the PC, after 3 idle minutes, or when the companion stops: control never outlives the request that asked for it.
 
@@ -224,6 +251,14 @@ Per bot: name, avatar (Clawd, blob, robot, cat, ghost, bunny), skin (Claude's or
 | `/mini-bot screenshot` | snip part of the screen |
 | `/mini-bot speech [install [small]]` | which speech recognizer is in use; set up offline Whisper |
 | `/mini-bot update` | which version is installed, whether GitHub has a newer one, and the commands to install it |
+| `/mini-bot on` / `off` | turn Mini on, or off until you turn it on or the PC restarts |
+| `/mini-bot autostart on` / `off` | whether Mini starts with your PC |
+| `/mini-bot assistant on` / `off` / `restart` | Mini's own Claude Code session in the background |
+| `/mini-bot listen on` / `off` | listen for the bot's name ("Hey Mini") |
+| `/mini-bot full-access on` / `off` | let Claude use the mouse and keyboard in any app without asking |
+| `/mini-bot routines` | your reminders and routines; `remove <n>` removes one |
+| `/mini-bot remind "<when>" <text>` | a reminder, e.g. `remind "in 20 minutes" stretch` |
+| `/mini-bot routine "<when>" <text>` | a prompt for Claude at a time, e.g. `routine "daily 09:00" brief me` |
 | `/mini-bot control stop` | take the mouse and keyboard back from Claude at once |
 | `/mini-bot log` | what Claude did the last time it used your mouse and keyboard |
 | `/mini-bot help` | the list |
@@ -233,11 +268,14 @@ Per bot: name, avatar (Clawd, blob, robot, cat, ghost, bunny), skin (Claude's or
 - A dropped file is only a path in the prompt: the bot never reads its contents, and Claude Code opens it under its own permissions.
 - Prompts reach Claude Code only through `$.prompt.submit`, so they run under your normal permission rules and appear in the transcript. The bot never reads or changes Claude Code's permission rules, and it is not a second assistant.
 - Access to the microphone (and screen, and computer control) is the companion's own and separate from Claude Code's permissions. Granting needs your explicit answer (a dialog in Claude Code, or the Allow button in the bot's panel); the runtime also refuses a grant that does not say it was confirmed. Grants last only while the runtime runs, so a restarted companion starts with nothing granted. Stopping the companion ends every capture.
-- The access indicator is computed from live access state alone, so hiding the bot cannot hide it.
+- The access indicator is computed from live access state alone, so hiding the bot cannot hide it. The same goes for the small mark while it listens for its name.
+- What stays on until you take it back (listening for its name, full access, the microphone button) is kept in `trust.json`. Turning one on takes your own click in the bot, which carries the second secret described below; anything can turn one off. This keeps Claude from granting itself more through the bot's interface. It is not a wall against code running as you: a program with your rights can change your files, and Claude Code's own permission rules are what govern Claude's commands.
+- Mini's own session runs in the permission mode you chose (auto unless you change it). The modes on offer are Claude Code's own, and the one that skips permission checks is not among them. Its permission questions come up in the bot and only your click answers them; no answer in time counts as no.
+- The session the companion keeps is the only one it ever starts or stops. It never touches your other Claude Code sessions.
 - Computer control is allowed one task at a time, in the bot, and only for the apps you allowed; the runtime checks every step against your answer, the allowed apps and the hard limits before the bot touches anything. Your answers in the bot carry a second secret that only the bot's own window process holds (never written to disk), so nothing that reads the runtime's token can answer for you, and Claude can never click the bot's own buttons or Claude Code's prompts.
 - The local interface listens on `127.0.0.1` only, on a random port, and every request needs a secret token kept in your user folder. Requests that carry an `Origin` header (a web page) or an unexpected `Host` are refused.
-- The bot refuses to take prompts while nothing in Claude Code is picking them up.
-- Nothing runs in the background without you: no hidden AI behaviour, no silent microphone or screen capture.
+- The bot refuses to take prompts while nothing in Claude Code is picking them up, unless its own session is on the way to do so.
+- Nothing runs in the background without you: Mini's own session and starting with the PC are yours to turn on, each is shown (the bot, the tray icon, Windows' startup list, the Assistant menu), and the session sits idle until you ask it something or a routine you approved comes due. No silent microphone or screen capture.
 
 ## How it fits together
 
@@ -252,7 +290,7 @@ Per bot: name, avatar (Clawd, blob, robot, cat, ghost, bunny), skin (Claude's or
 ```
 
 - **The mod** (`hooks/`) registers `/mini-bot`, picks up prompts from the bot about once a second and submits them with `$.prompt.submit`, and reports turn starts, tool runs and turn ends so the bot can show them.
-- **The runtime** (`runtime/`, Node, no packages) owns the settings while it runs, the prompt queue, the activity state, and the permissions. It writes `{ pid, port, token }` to `%APPDATA%\ClaudeMiniBot\runtime.json` (`MINI_BOT_HOME` overrides the folder).
+- **The runtime** (`runtime/`, Node, no packages) owns the settings while it runs, the prompt queue, the activity state, the permissions, the questions shown in the bot, the routines, and Mini's own session. It writes `{ pid, port, token }` to `%APPDATA%\ClaudeMiniBot\runtime.json` (`MINI_BOT_HOME` overrides the folder).
 - **The overlay** (`runtime/overlay/*.cs`) is compiled on first launch with the compiler that ships with Windows (cached afterwards in `%LOCALAPPDATA%\ClaudeMiniBot`). It is only a client of the runtime and decides nothing.
 - **`shared/config.mjs`** holds the settings model and every rule for changing a bot. The mod and the runtime both import it, so the floating dialog and `/mini-bot` can never disagree.
 
@@ -261,9 +299,11 @@ hooks/register.ts            wiring only
 hooks/lib/bridge.ts          prompts in, activity out
 hooks/lib/lifecycle.ts       start, stop, reconnect, keeping the two copies of the settings together
 hooks/lib/{config,profiles,fields,visibility,permissions,status,speech}.ts
+hooks/lib/assistant.ts       Mini's own session, listening, full access, routines, and Claude Code's questions in the bot
+hooks/lib/computer.ts        the tools Claude calls: the mouse and keyboard, looking, pointing, routines
 hooks/lib/*-menu.ts, menu.ts, commands.ts    the interactive menus and typed commands
-runtime/lib/                 auth, permissions, visibility, activity, prompts, the server
-runtime/overlay/             Api, Painter, BotWindow, PanelWindow, SettingsWindow, Dictation, Recorder, App ...
+runtime/lib/                 auth, permissions, trust, cards, visibility, activity, prompts, keeper, autostart, routines, computer, the server
+runtime/overlay/             Api, Painter, BotWindow, PanelWindow, SettingsWindow, Dictation, Recorder, LiveVoice, SessionWindow, Computer, App ...
 runtime/speech/install.ps1   one-time offline Whisper setup
 shared/config.mjs            settings model and profile rules (+ config.d.mts)
 tests/                       claude plugin test <folder>      runtime/test: node --test "test/*.test.mjs"
@@ -293,7 +333,9 @@ node --test "runtime/test/*.test.mjs"
 - Computer control works on the apps Windows' accessibility interface describes well (Office, Explorer, Settings, most desktop apps); games, remote desktops and apps that draw everything themselves are hit and miss. Admin windows are out of reach by design.
 - Taking over is noticed from real mouse and keyboard input; input that another program sends (a remote-desktop tool, a macro tool) is not counted as you.
 - Leaving the bot out of screenshots needs Windows 10 version 2004 or later; on older Windows it is hidden for a moment instead.
-- Voice-reply speech, sound effects and notification settings are stored and sent to the runtime; nothing consumes them yet.
+- Notification settings are stored and sent to the runtime; nothing consumes them yet.
+- "Hey Mini" is only as good as Whisper's hearing of your accent and your room, and it takes a second or two to answer. English only for now. Replies use the Windows voices you have installed, which can sound robotic. Without headphones the bot can hear itself, so while it talks only its full name with a greeting interrupts it.
+- Mini's own session is a real Claude Code session in a hidden console, not Claude Code's own background sessions, because its background service closes idle sessions within a minute or so when memory is short. Reminders and routines only fire while the PC is awake and the bot is on.
 - A companion started before an update must be restarted (`/mini-bot stop`, then `/mini-bot start`) to pick up the new version.
 
 ## License

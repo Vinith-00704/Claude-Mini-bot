@@ -13,8 +13,13 @@ export declare const DEFAULT_STOP_KEY: 'Ctrl+Alt+Esc'
 export declare const MAX_BLOCKED_APPS: number
 export declare const CONTROL_ACTIONS_RANGE: readonly [number, number]
 export declare const CONTROL_MINUTES_RANGE: readonly [number, number]
+export declare const DEFAULT_TALK_KEY: 'Ctrl+Alt+Space'
+export declare const DEFAULT_LOOK_KEY: 'Ctrl+Alt+Q'
+export declare const SPEAK_MODES: readonly ['spoken', 'always', 'off']
+export declare const VOICE_RATE_RANGE: readonly [number, number]
+export declare const SESSION_PERMISSIONS: readonly ['auto', 'acceptEdits', 'manual']
 export declare const ACCENTS: readonly ['claude', 'blue', 'green', 'pink', 'orange', 'purple']
-export declare const CONFIG_VERSION: 2
+export declare const CONFIG_VERSION: 3
 export declare const THEMES: readonly ['dark', 'light']
 export declare const PANEL_WIDTH_RANGE: readonly [number, number]
 export declare const PANEL_REPLY_RANGE: readonly [number, number]
@@ -32,6 +37,8 @@ export type Anchor = (typeof ANCHORS)[number]
 export type StartupMode = (typeof STARTUP_MODES)[number]
 export type ModelLabel = (typeof MODEL_LABELS)[number]
 export type ControlLevel = (typeof CONTROL_LEVELS)[number]
+export type SpeakMode = (typeof SPEAK_MODES)[number]
+export type SessionPermissions = (typeof SESSION_PERMISSIONS)[number]
 export type Accent = (typeof ACCENTS)[number]
 export type Theme = (typeof THEMES)[number]
 
@@ -53,7 +60,7 @@ export type Profile = {
 }
 
 export type Config = {
-  version: 2
+  version: 3
   revision: number
   activeProfileId: string
   profiles: Profile[]
@@ -63,8 +70,12 @@ export type Config = {
   notifications: { enabled: boolean; onTurnComplete: boolean; onAccessChange: boolean }
   startup: { mode: StartupMode; stopWithSession: boolean }
   display: { modelLabel: ModelLabel }
-  /** The shortcut that hides and shows the bot from any program, written like "Ctrl+Alt+M", or "off". */
-  hotkey: { toggle: string }
+  /** Shortcuts that work from any program, written like "Ctrl+Alt+M", or "off": hide and show the bot, talk, show Claude the window in front. */
+  hotkey: { toggle: string; talk: string; look: string }
+  /** Live talking: when replies are said aloud, listening on after a reply, checking what was heard before it goes, the Windows voice (empty for its default) and speed. */
+  live: { speak: SpeakMode; followUp: boolean; review: boolean; voice: string; rate: number }
+  /** Mini's own Claude Code session: whether the companion keeps one running, whether the person has been offered it, its model (empty for the default) and permission mode. */
+  assistant: { session: boolean; offered: boolean; model: string; permissions: SessionPermissions }
   /** Computer control's limits. `blockedApps` are program names ("outlook"), added to the ones always blocked. */
   computer: { level: ControlLevel; stopKey: string; blockedApps: string[]; maxActions: number; maxMinutes: number }
   wasRunning: boolean
@@ -87,6 +98,8 @@ export type SettingsPatch = {
   display?: Partial<Config['display']>
   hotkey?: Partial<Config['hotkey']>
   computer?: Partial<Config['computer']>
+  live?: Partial<Config['live']>
+  assistant?: Partial<Config['assistant']>
   onboarded?: boolean
   visible?: boolean
 }
@@ -111,6 +124,8 @@ export declare function normalizeConfig(raw: unknown): Config
 export declare function parseHotkey(raw: unknown): string | null
 /** A program's name as compared ("EXCEL.EXE" is "excel"), or null when it is not a usable name. */
 export declare function appName(raw: unknown): string | null
+/** A model name as Claude Code takes it after --model, or null. */
+export declare function modelName(raw: unknown): string | null
 export declare function sameChoices(a: Config, b: Config): boolean
 export declare function activeProfile(config: Config): Profile
 export declare function findProfile(config: Config, query: string): Profile | undefined

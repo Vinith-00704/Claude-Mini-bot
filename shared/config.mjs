@@ -31,6 +31,14 @@ export const DEFAULT_STOP_KEY = 'Ctrl+Alt+Esc'
 export const MAX_BLOCKED_APPS = 30
 export const CONTROL_ACTIONS_RANGE = [10, 1000]
 export const CONTROL_MINUTES_RANGE = [1, 120]
+// Live talking: the key that starts talking and the key that shows Claude the window in front, from any program.
+export const DEFAULT_TALK_KEY = 'Ctrl+Alt+Space'
+export const DEFAULT_LOOK_KEY = 'Ctrl+Alt+Q'
+// When a reply is said aloud: when the person spoke the prompt, always, or never.
+export const SPEAK_MODES = ['spoken', 'always', 'off']
+export const VOICE_RATE_RANGE = [-5, 5]
+// The permission mode Mini's own Claude Code session runs in, by Claude Code's names. Skipping permission checks is deliberately not one of them.
+export const SESSION_PERMISSIONS = ['auto', 'acceptEdits', 'manual']
 // 'claude' is Claude Code's own accent, the colour of its spinner and prompt marks.
 export const ACCENTS = ['claude', 'blue', 'green', 'pink', 'orange', 'purple']
 export const THEMES = ['dark', 'light']
@@ -56,7 +64,8 @@ export const defaultProfile = (id = 'default', name = 'Mini') => ({
 })
 
 // 2: Claude Code's own look is the default. A stored version 1 is migrated (see normalizeConfig).
-export const CONFIG_VERSION = 2
+// 3: sound effects mean something now (the chime when the bot hears its name), and are on unless the person turns them off.
+export const CONFIG_VERSION = 3
 
 export const defaultConfig = () => ({
   version: CONFIG_VERSION,
@@ -67,11 +76,17 @@ export const defaultConfig = () => ({
   profiles: [defaultProfile()],
   visible: true,
   onboarded: false,
-  sound: { voice: false, effects: false, volume: 50 },
+  sound: { voice: false, effects: true, volume: 70 },
   notifications: { enabled: true, onTurnComplete: false, onAccessChange: true },
   startup: { mode: 'restore', stopWithSession: false },
   display: { modelLabel: 'full' },
-  hotkey: { toggle: DEFAULT_HOTKEY },
+  hotkey: { toggle: DEFAULT_HOTKEY, talk: DEFAULT_TALK_KEY, look: DEFAULT_LOOK_KEY },
+  // Live talking: when replies are said aloud, whether it goes on listening for a moment after a reply without its
+  // name, whether what was heard waits to be checked before it is sent, and the Windows voice and its speed.
+  live: { speak: 'spoken', followUp: true, review: false, voice: '', rate: 0 },
+  // Mini's own Claude Code session, which the companion keeps running in the background once the person asks for it.
+  // `offered` says the person has been asked once; `model` is empty for Claude Code's default.
+  assistant: { session: false, offered: false, model: '', permissions: 'auto' },
   // The limits of computer control. Each task still needs the person's own yes in the bot.
   computer: { level: 'step', stopKey: DEFAULT_STOP_KEY, blockedApps: [], maxActions: 150, maxMinutes: 20 },
   // Whether the companion was running when the person last started or stopped it.
@@ -99,14 +114,14 @@ export const parseHotkey = raw => {
   const parts = word.split('+').map(part => part.trim())
   const typed = parts.pop() ?? ''
   const key = typed === 'escape' ? 'esc' : typed
-  if (!/^([a-z0-9]|f([1-9]|1[0-2])|esc|pause)$/.test(key)) return null
+  if (!/^([a-z0-9]|f([1-9]|1[0-2])|esc|pause|space)$/.test(key)) return null
   const modifiers = new Set()
   for (const part of parts) {
     if (!(part in MODIFIER_NAMES)) return null
     modifiers.add(MODIFIER_NAMES[part])
   }
   if (!modifiers.has('Ctrl') && !modifiers.has('Alt') && !modifiers.has('Win')) return null
-  const name = key === 'esc' || key === 'pause' ? key[0].toUpperCase() + key.slice(1) : key.toUpperCase()
+  const name = key === 'esc' || key === 'pause' || key === 'space' ? key[0].toUpperCase() + key.slice(1) : key.toUpperCase()
   return [...MODIFIER_ORDER.filter(m => modifiers.has(m)), name].join('+')
 }
 
@@ -114,6 +129,12 @@ export const parseHotkey = raw => {
 export const appName = raw => {
   const name = String(raw ?? '').trim().toLowerCase().replace(/\.exe$/, '')
   return /^[a-z0-9][a-z0-9 ._-]{0,39}$/.test(name) ? name : null
+}
+
+/** A model name as Claude Code takes it after --model ("sonnet", "claude-sonnet-5-5"), or null. It goes on a command line, so only these characters. */
+export const modelName = raw => {
+  const name = String(raw ?? '').trim()
+  return /^[A-Za-z0-9][A-Za-z0-9._\-[\]]{0,59}$/.test(name) ? name : null
 }
 
 const normalizeComputer = (raw, base) => {
@@ -203,6 +224,8 @@ export const normalizeConfig = raw => {
   const startup = rec(c.startup)
   const display = rec(c.display)
   const hotkey = rec(c.hotkey)
+  const live = rec(c.live)
+  const assistant = rec(c.assistant)
   return {
     version: CONFIG_VERSION,
     revision: num(c.revision, 0, Number.MAX_SAFE_INTEGER, 0),
@@ -212,7 +235,8 @@ export const normalizeConfig = raw => {
     onboarded: bool(c.onboarded, base.onboarded),
     sound: {
       voice: bool(sound.voice, base.sound.voice),
-      effects: bool(sound.effects, base.sound.effects),
+      // Before version 3 this setting did nothing, so a stored "off" was never a choice.
+      effects: (c.version ?? 0) < 3 ? base.sound.effects : bool(sound.effects, base.sound.effects),
       volume: num(sound.volume, 0, 100, base.sound.volume),
     },
     notifications: {
@@ -225,7 +249,24 @@ export const normalizeConfig = raw => {
       stopWithSession: bool(startup.stopWithSession, base.startup.stopWithSession),
     },
     display: { modelLabel: pick(display.modelLabel, MODEL_LABELS, base.display.modelLabel) },
-    hotkey: { toggle: parseHotkey(hotkey.toggle) ?? base.hotkey.toggle },
+    hotkey: {
+      toggle: parseHotkey(hotkey.toggle) ?? base.hotkey.toggle,
+      talk: parseHotkey(hotkey.talk) ?? base.hotkey.talk,
+      look: parseHotkey(hotkey.look) ?? base.hotkey.look,
+    },
+    live: {
+      speak: pick(live.speak, SPEAK_MODES, base.live.speak),
+      followUp: bool(live.followUp, base.live.followUp),
+      review: bool(live.review, base.live.review),
+      voice: text(live.voice, 60, base.live.voice),
+      rate: num(live.rate, ...VOICE_RATE_RANGE, base.live.rate),
+    },
+    assistant: {
+      session: bool(assistant.session, base.assistant.session),
+      offered: bool(assistant.offered, base.assistant.offered),
+      model: modelName(assistant.model) ?? base.assistant.model,
+      permissions: pick(assistant.permissions, SESSION_PERMISSIONS, base.assistant.permissions),
+    },
     computer: normalizeComputer(c.computer, base.computer),
     wasRunning: bool(c.wasRunning, base.wasRunning),
   }
@@ -381,7 +422,47 @@ export const patchProfile = (config, id, patch) => {
   }
 }
 
-const SETTINGS_KEYS = ['sound', 'notifications', 'startup', 'display', 'hotkey', 'computer', 'onboarded', 'visible']
+const SETTINGS_KEYS = ['sound', 'notifications', 'startup', 'display', 'hotkey', 'computer', 'live', 'assistant', 'onboarded', 'visible']
+
+const HOTKEY_LABELS = { toggle: 'the hide/show shortcut', talk: 'the talk key', look: 'the key that shows Claude your window' }
+
+/** Why changed shortcuts cannot be used, or null. No two of them may be the same key, and none may be the key that stops computer control. */
+const checkHotkeys = (config, patch) => {
+  const p = rec(patch)
+  const wanted = { ...config.hotkey }
+  for (const name of Object.keys(HOTKEY_LABELS)) {
+    if (!(name in p)) continue
+    const key = parseHotkey(p[name])
+    if (key === null) return 'A shortcut is Ctrl, Alt or Win with a letter, a digit, Space or F1-F12, for example Ctrl+Alt+M. "off" turns it off.'
+    wanted[name] = key
+  }
+  for (const name of Object.keys(p).filter(n => n in HOTKEY_LABELS)) {
+    if (wanted[name] === 'off') continue
+    if (wanted[name] === config.computer.stopKey) return `${config.computer.stopKey} is the key that stops computer control.`
+    const clash = Object.keys(HOTKEY_LABELS).find(other => other !== name && wanted[other] === wanted[name])
+    if (clash) return `${wanted[name]} is already ${HOTKEY_LABELS[clash]}.`
+  }
+  return null
+}
+
+/** Why a change to how the bot talks cannot be made, or null. */
+const checkLive = patch => {
+  const l = rec(patch)
+  if ('speak' in l && !SPEAK_MODES.includes(l.speak)) return `Speaking replies is one of: ${SPEAK_MODES.join(', ')}.`
+  for (const key of ['followUp', 'review']) if (key in l && typeof l[key] !== 'boolean') return `${key} is on or off.`
+  if ('voice' in l && (typeof l.voice !== 'string' || l.voice.length > 60)) return 'The voice is the name of a Windows voice, such as Microsoft Zira Desktop.'
+  if ('rate' in l && !(Number.isInteger(l.rate) && l.rate >= VOICE_RATE_RANGE[0] && l.rate <= VOICE_RATE_RANGE[1])) return `The speaking speed is a whole number from ${VOICE_RATE_RANGE[0]} to ${VOICE_RATE_RANGE[1]}.`
+  return null
+}
+
+/** Why a change to Mini's own session cannot be made, or null. */
+const checkAssistant = patch => {
+  const a = rec(patch)
+  for (const key of ['session', 'offered']) if (key in a && typeof a[key] !== 'boolean') return `${key} is on or off.`
+  if ('model' in a && a.model !== '' && modelName(a.model) === null) return 'The model is a name Claude Code knows, such as sonnet, opus or haiku, or "default".'
+  if ('permissions' in a && !SESSION_PERMISSIONS.includes(a.permissions)) return `The session's permission mode is one of: ${SESSION_PERMISSIONS.join(', ')}.`
+  return null
+}
 
 /** Why a change to the computer-control settings cannot be made, or null. */
 const checkComputer = (config, patch) => {
@@ -390,7 +471,7 @@ const checkComputer = (config, patch) => {
   if ('stopKey' in c) {
     const key = parseHotkey(c.stopKey)
     if (key === null || key === 'off') return 'The stop key is Ctrl, Alt or Win with a letter, a digit, F1-F12, Esc or Pause, for example Ctrl+Alt+Esc. It cannot be turned off.'
-    if (key === config.hotkey.toggle) return `${key} is already the hide/show shortcut.`
+    for (const [name, label] of Object.entries(HOTKEY_LABELS)) if (key === config.hotkey[name]) return `${key} is already ${label}.`
   }
   if ('blockedApps' in c && !(Array.isArray(c.blockedApps) && c.blockedApps.length <= MAX_BLOCKED_APPS && c.blockedApps.every(a => appName(a) !== null))) {
     return `Blocked apps are program names such as "chrome" or "outlook", ${MAX_BLOCKED_APPS} at most.`
@@ -406,14 +487,8 @@ export const patchSettings = (config, patch) => {
   const p = rec(patch)
   const extra = Object.keys(p).find(k => !SETTINGS_KEYS.includes(k))
   if (extra) return { error: `Unknown setting "${extra}".` }
-  if ('toggle' in rec(p.hotkey) && parseHotkey(p.hotkey.toggle) === null) {
-    return { error: 'A shortcut is Ctrl, Alt or Win with a letter, a digit or F1-F12, for example Ctrl+Alt+M. "off" turns it off.' }
-  }
-  if ('toggle' in rec(p.hotkey) && parseHotkey(p.hotkey.toggle) === config.computer.stopKey) {
-    return { error: `${config.computer.stopKey} is the key that stops computer control.` }
-  }
-  const badComputer = checkComputer(config, p.computer)
-  if (badComputer) return { error: badComputer }
+  const bad = checkHotkeys(config, p.hotkey) ?? checkComputer(config, p.computer) ?? checkLive(p.live) ?? checkAssistant(p.assistant)
+  if (bad) return { error: bad }
   const merged = {
     ...config,
     ...('onboarded' in p ? { onboarded: p.onboarded } : {}),
@@ -424,6 +499,8 @@ export const patchSettings = (config, patch) => {
     display: { ...config.display, ...rec(p.display) },
     hotkey: { ...config.hotkey, ...rec(p.hotkey) },
     computer: { ...config.computer, ...rec(p.computer) },
+    live: { ...config.live, ...rec(p.live) },
+    assistant: { ...config.assistant, ...rec(p.assistant) },
   }
   return { config: normalizeConfig(merged), message: 'Settings updated.' }
 }

@@ -25,6 +25,8 @@ const world = async ($: any, on: any, { running = true }: { running?: boolean } 
   on('turn.step', async function* (_: any, e: any) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
   })
+  on('session.id', () => ({ value: 'session-1' }))
+  on('session.cwd', () => ({ value: 'F:/project' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
@@ -94,9 +96,9 @@ const seen = {
   elements: [{ n: 1, type: 'button', name: 'Save', x: 40, y: 12, w: 20, h: 20, password: false, enabled: true }],
 }
 
-test('the four computer-control tools are offered to Claude, each saying what it may and may not do', async ($, on) => {
+test('the computer-control tools are offered to Claude, each saying what it may and may not do', async ($, on) => {
   const { registered } = await world($, on)
-  expect(registered.map(r => r.name)).toEqual(['computer_start', 'computer_look', 'computer_act', 'computer_stop'])
+  expect(registered.map(r => r.name)).toEqual(['computer_start', 'computer_look', 'computer_act', 'computer_stop', 'screen_look', 'show_on_screen', 'add_routine', 'list_routines', 'remove_routine'])
   const start = registered[0]
   expect(start.description).toMatch(/Prefer your other tools/)
   expect(start.description).toMatch(/can never be controlled/)

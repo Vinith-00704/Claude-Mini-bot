@@ -7,6 +7,7 @@
 
 import type { Register } from 'claude-code'
 
+import { answerPermission, isMainSession, wasTurnedOff } from './lib/assistant'
 import { commandCheck, modelCheck, pump, stepStarted, toolFinished, toolStarted, turnEnded, turnStarted } from './lib/bridge'
 import { connect } from './lib/client'
 import { controlTool, endControl, serveControl, TOOLS } from './lib/computer'
@@ -28,7 +29,7 @@ async function resume($: Engine) {
     if (link) {
       // A companion that outlived the last session: reconnect and bring the two copies of the settings together.
       await syncConfig($, link)
-    } else if (config.startup.mode === 'always' || (config.startup.mode === 'restore' && config.wasRunning)) {
+    } else if (!(await wasTurnedOff($)) && (config.startup.mode === 'always' || (config.startup.mode === 'restore' && config.wasRunning))) {
       const started = await startRuntime($)
       if (!started.ok) $.ui.log(started.message)
     }
@@ -107,6 +108,13 @@ export const register: Register = on => {
     }
   })
 
+  // Nobody sits at the terminal of Mini's own session, so what Claude Code would ask there is asked in the bot, and
+  // only the person's click there answers it. In a terminal session Claude Code's own dialog comes up as usual.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    if (!(await isMainSession($))) return next(e)
+    return answerPermission($, e, next.signal)
+  })
+
   on('turn.complete', async ($, e, next) => {
     void turnEnded($, e).catch(() => {})
     // Control of the mouse and keyboard never outlives the turn that asked for it: it is over before the turn is.
@@ -127,7 +135,8 @@ export const register: Register = on => {
     } catch {}
     if (e.reason !== 'clear') {
       try {
-        if ((await loadConfig($)).startup.stopWithSession) await stopRuntime($, { remember: true })
+        // Mini's own session ending says nothing about the companion, which started it and will start it again.
+        if ((await loadConfig($)).startup.stopWithSession && !(await isMainSession($))) await stopRuntime($, { remember: true })
       } catch {}
     }
 

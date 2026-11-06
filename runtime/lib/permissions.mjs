@@ -6,8 +6,9 @@
 //
 // A grant needs an explicit confirmation from the caller, and it lives only as
 // long as this runtime process: a restarted runtime starts with nothing
-// granted. A capture can only run while its access is granted, and revoking
-// the access ends the capture in the same step.
+// granted, except what the person allowed for good (trust.mjs). A capture can
+// only run while its access is granted, and revoking the access ends the
+// capture in the same step.
 
 export const KINDS = ['screen', 'microphone', 'computer']
 

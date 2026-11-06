@@ -18,6 +18,8 @@ import { syncConfig } from './lifecycle'
 import { MIN_RUNTIME_VERSION, type Attachment, type Engine, type Phase, type QueuedPrompt } from './types'
 
 const DEFAULT_SCREENSHOT_ASK = 'Take a look at this screenshot.'
+// Goes with a spoken prompt whose reply is read aloud, so Claude answers for the ear.
+const SPOKEN_NOTE = '(Spoken to the Mini Bot. Your reply is read aloud, so answer in a sentence or two of plain speech, with no markdown, lists or code.)'
 
 /** What Claude is asked when something was attached and nothing was typed. */
 function defaultAsk(images: number, files: Attachment[]): string {
@@ -49,7 +51,7 @@ export function composePrompt(prompt: Pick<QueuedPrompt, 'text' | 'attachments'>
   return `${ask}\n\n${ordered.map(describe).join('\n')}`
 }
 
-type ClaimReply = { prompts: QueuedPrompt[]; revision: number; version: number }
+type ClaimReply = { prompts: QueuedPrompt[]; abort?: boolean; revision: number; version: number }
 
 export type Report = {
   phase: Phase
@@ -74,6 +76,18 @@ let sessionUnsupported = false
 // The slash commands as last told to the companion, for the bot's `/` picker.
 let lastCommandsKey = ''
 let commandsUnsupported = false
+// Who this session is, once known, and the main conversation's running turn, for when the person asks to stop it.
+let me: { id: string; role: 'main' | 'terminal'; name: string } | null = null
+let runningTurn: string | null = null
+
+/** Who this session is, as the companion tells sessions apart. Mini's own session was started with MINI_BOT_ROLE set. */
+export async function identity($: Engine) {
+  if (me) return me
+  const role = (await $.env.get('MINI_BOT_ROLE')) === 'main' ? 'main' : 'terminal'
+  const folder = (await $.session.cwd()).split(/[\\/]/).filter(Boolean).pop() ?? ''
+  me = { id: await $.session.id(), role, name: role === 'main' ? 'Mini' : folder }
+  return me
+}
 
 /** True when the companion is too old to carry prompts, so `/mini-bot status` can say so. */
 export function isRuntimeOutdated(): boolean {
@@ -86,6 +100,11 @@ const CONTROL_LABELS: Record<string, string> = {
   computer_look: 'Looking at your screen',
   computer_act: 'Using your PC',
   computer_stop: 'Handing your PC back',
+  screen_look: 'Looking at your screen',
+  show_on_screen: 'Showing you where',
+  add_routine: 'Adding a routine',
+  list_routines: 'Reading your routines',
+  remove_routine: 'Removing a routine',
 }
 
 function shortName(tool: string): string {
@@ -98,17 +117,19 @@ export async function report($: Engine, what: Report): Promise<void> {
   const key = JSON.stringify([what.phase, what.id ?? null, what.detail ?? '', what.source ?? 'claude'])
   if (key === lastReport && what.preview === undefined) return
   lastReport = key
-  const reply = await request($, link, 'POST', '/v1/activity', what)
+  const reply = await request($, link, 'POST', '/v1/activity', { ...what, session: me?.id })
   if (!reply.ok && reply.status === 0) link = null
 }
 
 export async function submitPrompt($: Engine, queued: QueuedPrompt): Promise<void> {
   const prompt = { ...queued, text: composePrompt(queued) }
+  // The note goes with what is sent; the prompt is recognized by what the person said.
+  const spoken = queued.source === 'voice' && (await loadConfig($)).live.speak !== 'off'
   pending.push(prompt)
   try {
     // Resolves once the turn starts, which may be a while if Claude is busy:
     // it is deliberately not awaited by the caller, so asking for new prompts goes on.
-    await $.prompt.submit({ text: prompt.text, asUser: true })
+    await $.prompt.submit({ text: spoken ? `${prompt.text}\n\n${SPOKEN_NOTE}` : prompt.text, asUser: true })
   } catch {
     pending = pending.filter(p => p.id !== prompt.id)
     await report($, {
@@ -139,7 +160,7 @@ export async function pump($: Engine): Promise<QueuedPrompt[]> {
     await modelCheck($)
     await commandCheck($)
   }
-  const reply = await request<ClaimReply>($, link, 'POST', '/v1/prompts/claim', {})
+  const reply = await request<ClaimReply>($, link, 'POST', '/v1/prompts/claim', { bridge: await identity($) })
   if (!reply.ok) {
     // A companion from before the prompt queue has no such route.
     isOutdated = reply.status === 404
@@ -147,6 +168,21 @@ export async function pump($: Engine): Promise<QueuedPrompt[]> {
     return []
   }
   isOutdated = reply.data.version < MIN_RUNTIME_VERSION
+  if (reply.data.abort && runningTurn) {
+    const turnId = runningTurn
+    runningTurn = null
+    try {
+      await $.turn.abort({ turnId })
+    } catch {
+      // It had just ended by itself.
+    }
+    // A turn cut this way reports nothing more about itself, so the bot is told here.
+    const id = current?.id ?? null
+    const source = current ? 'bot' : 'claude'
+    current = null
+    toolsRunning = 0
+    await report($, { phase: 'idle', id, source, detail: '' })
+  }
   try {
     if (reply.data.revision !== (await loadConfig($)).revision) await syncConfig($, link)
   } catch {
@@ -156,8 +192,9 @@ export async function pump($: Engine): Promise<QueuedPrompt[]> {
 }
 
 /** A turn of the main conversation began. If it is a prompt the bot sent, it is tracked as that one. */
-export async function turnStarted($: Engine, e: { text: string; agentId?: string }): Promise<void> {
+export async function turnStarted($: Engine, e: { text: string; turnId: string; agentId?: string }): Promise<void> {
   if (e.agentId !== undefined) return
+  runningTurn = e.turnId
   toolsRunning = 0
   const text = e.text.trim()
   const index = pending.findIndex(p => p.text === text || text.includes(p.text))
@@ -177,6 +214,7 @@ export async function toolFinished($: Engine): Promise<void> {
 
 export async function turnEnded($: Engine, e: { answer: string; reason: string; agentId?: string }): Promise<void> {
   if (e.agentId !== undefined) return
+  runningTurn = null
   const mine = current
   current = null
   toolsRunning = 0
@@ -195,7 +233,7 @@ async function publishModel($: Engine, id: string, effort: string | null): Promi
   const key = `${name}|${effort ?? ''}`
   if (key === lastModelKey) return
   lastModelKey = key
-  const reply = await request($, link, 'POST', '/v1/session', { model: id, name, effort })
+  const reply = await request($, link, 'POST', '/v1/session', { model: id, name, effort, session: me?.id })
   if (reply.ok) return
   if (reply.status === 0) link = null
   // A companion from before this existed has no such route: say nothing more to it.
@@ -238,7 +276,7 @@ export async function commandCheck($: Engine): Promise<void> {
   const key = JSON.stringify(entries)
   if (key === lastCommandsKey) return
   lastCommandsKey = key
-  const reply = await request($, link, 'POST', '/v1/commands', { commands: entries })
+  const reply = await request($, link, 'POST', '/v1/commands', { commands: entries, session: me?.id })
   if (reply.ok) return
   if (reply.status === 0) link = null
   // A companion from before this existed has no such route: say nothing more to it.
