@@ -9,6 +9,16 @@ export {
   ACCENTS,
   ANCHORS,
   AVATARS,
+  CUSTOM_AVATAR,
+  checkSprite,
+  designBot,
+  hexColor,
+  DEFAULT_SUMMARIZE_KEY,
+  DEFAULT_TERMINAL_KEY,
+  MAX_SPRITE_COLORS,
+  MAX_SPRITE_FRAMES,
+  SPRITE_SIZE_RANGE,
+  SPRITE_STATES,
   CONTROL_ACTIONS_RANGE,
   CONTROL_LEVELS,
   CONTROL_MINUTES_RANGE,
@@ -49,6 +59,7 @@ export type {
   SessionPermissions,
   SettingsPatch,
   SpeakMode,
+  Sprite,
   Size,
   Skin,
   Speed,
@@ -102,6 +113,8 @@ export type RuntimeState = {
   }
   /** Whether Windows gave the overlay the hide/show shortcut now chosen; null until the overlay says (or for a companion that predates it). */
   hotkey?: { combo: string; ok: boolean } | null
+  /** The same for the other shortcuts, by name (talk, look, summarize, terminal), once the overlay has said. */
+  keys?: Record<string, { combo: string; ok: boolean }>
   bridge: { connected: boolean; queued: number }
 }
 

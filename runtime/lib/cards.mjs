@@ -22,16 +22,17 @@ export class Cards {
 
   /**
    * Puts a question up. `options` are `{ id, label, primary? }`, two or three of them. `waitMs` is how long before it
-   * answers itself with 'timeout' (none: it waits for ever). Resolves the id of the choice.
+   * answers itself with 'timeout' (none: it waits for ever). `preview` is something the bot shows with the question
+   * (a designed bot, for the person to look at before they say yes). Resolves the id of the choice.
    */
-  ask({ kind, text, options, waitMs }) {
+  ask({ kind, text, options, waitMs, preview }) {
     const clean = typeof text === 'string' ? text.slice(0, MAX_TEXT) : ''
     if (clean.trim() === '') throw fail(400, 'a question has text')
     if (!Array.isArray(options) || options.length < 2 || options.length > 3) throw fail(400, 'a question has two or three answers')
     const list = options.map(o => ({ id: String(o.id).slice(0, 40), label: String(o.label).slice(0, 60), primary: o.primary === true }))
     return new Promise(resolve => {
       const id = `c${(this.#seq += 1).toString(36)}${Math.random().toString(36).slice(2, 8)}`
-      const card = { id, kind: typeof kind === 'string' ? kind.slice(0, 20) : 'question', text: clean, options: list, resolve, timer: null }
+      const card = { id, kind: typeof kind === 'string' ? kind.slice(0, 20) : 'question', text: clean, options: list, preview: preview ?? null, resolve, timer: null }
       if (waitMs) {
         card.timer = this.#timers.set(() => this.#settle(id, 'timeout'), waitMs)
         card.timer?.unref?.()
@@ -105,6 +106,6 @@ export class Cards {
   /** The question to show now, if any. */
   current() {
     const card = this.#queue[0]
-    return card ? { id: card.id, kind: card.kind, text: card.text, options: card.options } : null
+    return card ? { id: card.id, kind: card.kind, text: card.text, options: card.options, ...(card.preview ? { preview: card.preview } : {}) } : null
   }
 }

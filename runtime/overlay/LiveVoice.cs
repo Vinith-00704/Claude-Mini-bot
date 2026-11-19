@@ -51,7 +51,7 @@ namespace MiniBot
     /// <summary>The few spoken things the bot does itself, at once. Anything else is for Claude.</summary>
     public static class SpokenCommand
     {
-        public const string Stop = "stop", Quiet = "quiet", Hide = "hide", Show = "show", Deaf = "deaf", Off = "off", Done = "done";
+        public const string Stop = "stop", Quiet = "quiet", Hide = "hide", Show = "show", Deaf = "deaf", Off = "off", Done = "done", Summarize = "summarize", Terminal = "terminal";
 
         static readonly Dictionary<string, string> Words = new Dictionary<string, string>
         {
@@ -61,6 +61,11 @@ namespace MiniBot
             { "show", Show }, { "show yourself", Show }, { "come back", Show },
             { "stop listening", Deaf }, { "mute", Deaf }, { "mute yourself", Deaf }, { "stop listening to me", Deaf },
             { "turn off", Off }, { "turn yourself off", Off }, { "switch off", Off }, { "switch yourself off", Off }, { "shut yourself down", Off },
+            { "summarize this page", Summarize }, { "summarise this page", Summarize }, { "summarize the page", Summarize }, { "summarise the page", Summarize },
+            { "summarize this", Summarize }, { "summarise this", Summarize }, { "summarize this for me", Summarize }, { "summarise this for me", Summarize },
+            { "summarize this page for me", Summarize }, { "summarise this page for me", Summarize }, { "summarize page", Summarize }, { "summarise page", Summarize },
+            { "summarize this article", Summarize }, { "summarise this article", Summarize }, { "summarize this document", Summarize }, { "summarise this document", Summarize },
+            { "open claude code", Terminal }, { "open claude", Terminal }, { "show claude code", Terminal }, { "open the terminal", Terminal }, { "open your terminal", Terminal }, { "show the terminal", Terminal },
             { "thanks", Done }, { "thank you", Done }, { "thats all", Done }, { "that is all", Done }, { "goodbye", Done }, { "bye", Done }, { "no thanks", Done }, { "nothing", Done },
         };
 

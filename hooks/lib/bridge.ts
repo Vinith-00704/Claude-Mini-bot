@@ -12,14 +12,29 @@
 
 import { buildCatalog } from './catalog'
 import { connect, request, type Link } from './client'
-import { loadConfig } from './config'
+import { configKey, loadConfig } from './config'
+import { activeProfile } from './profiles'
 import { effortLevel, friendlyModel } from './model-info'
 import { syncConfig } from './lifecycle'
-import { MIN_RUNTIME_VERSION, type Attachment, type Engine, type Phase, type QueuedPrompt } from './types'
+import { MIN_RUNTIME_VERSION, type Attachment, type Engine, type Phase, type Profile, type QueuedPrompt } from './types'
 
 const DEFAULT_SCREENSHOT_ASK = 'Take a look at this screenshot.'
 // Goes with a spoken prompt whose reply is read aloud, so Claude answers for the ear.
 const SPOKEN_NOTE = '(Spoken to the Mini Bot. Your reply is read aloud, so answer in a sentence or two of plain speech, with no markdown, lists or code.)'
+// A reply still being written is passed on to the bot each time it has grown by about this much.
+const STREAM_STEP = 24
+const MAX_STREAM = 20000
+
+/**
+ * How the bot on the screen talks, as a note that goes to Claude with what is sent from the bot. A neutral bot
+ * with no notes adds nothing. It is about wording alone: it asks for nothing and changes no task.
+ */
+export function personaNote(profile: Profile): string {
+  const tone = profile.personality.tone
+  const notes = profile.personality.notes.replace(/\s+/g, ' ').trim()
+  if (tone === 'neutral' && notes === '') return ''
+  return `(You are answering as ${profile.name}, the person's Mini Bot${tone !== 'neutral' ? `, in a ${tone} tone` : ''}.${notes ? ` Its character: ${notes}${/[.!?]$/.test(notes) ? '' : '.'}` : ''} This is only about how the reply is worded: what you do, and what is true, stay the same.)`
+}
 
 /** What Claude is asked when something was attached and nothing was typed. */
 function defaultAsk(images: number, files: Attachment[]): string {
@@ -51,14 +66,16 @@ export function composePrompt(prompt: Pick<QueuedPrompt, 'text' | 'attachments'>
   return `${ask}\n\n${ordered.map(describe).join('\n')}`
 }
 
-type ClaimReply = { prompts: QueuedPrompt[]; abort?: boolean; revision: number; version: number }
+type ClaimReply = { prompts: QueuedPrompt[]; abort?: boolean; revision: number; key?: string; version: number }
+// After the copies of the settings were found to differ and were brought together, this many seconds pass before it is looked at again.
+const DRIFT_REST_TICKS = 30
 
 export type Report = {
   phase: Phase
   id?: string | null
   detail?: string
   source?: 'bot' | 'claude'
-  preview?: { text: string; isError: boolean }
+  preview?: { text: string; isError: boolean; partial?: boolean }
 }
 
 // Module state. It starts over if the mod reloads; the companion holds the truth.
@@ -79,6 +96,12 @@ let commandsUnsupported = false
 // Who this session is, once known, and the main conversation's running turn, for when the person asks to stop it.
 let me: { id: string; role: 'main' | 'terminal'; name: string } | null = null
 let runningTurn: string | null = null
+// What the bot was last told Claude Code is doing, and the reply of the bot's own turn as far as it has been written.
+let shown: { phase: Phase; detail: string } = { phase: 'idle', detail: '' }
+let streamText = ''
+let streamSent = 0
+let isStreaming = false
+let driftRest = 0
 
 /** Who this session is, as the companion tells sessions apart. Mini's own session was started with MINI_BOT_ROLE set. */
 export async function identity($: Engine) {
@@ -87,6 +110,11 @@ export async function identity($: Engine) {
   const folder = (await $.session.cwd()).split(/[\\/]/).filter(Boolean).pop() ?? ''
   me = { id: await $.session.id(), role, name: role === 'main' ? 'Mini' : folder }
   return me
+}
+
+/** Whether a turn of the main conversation is running now. */
+export function isTurnRunning(): boolean {
+  return runningTurn !== null
 }
 
 /** True when the companion is too old to carry prompts, so `/mini-bot status` can say so. */
@@ -101,6 +129,9 @@ const CONTROL_LABELS: Record<string, string> = {
   computer_act: 'Using your PC',
   computer_stop: 'Handing your PC back',
   screen_look: 'Looking at your screen',
+  read_page: 'Reading the page',
+  design_bot: 'Showing you the new bot',
+  get_bot: 'Looking at your bots',
   show_on_screen: 'Showing you where',
   add_routine: 'Adding a routine',
   list_routines: 'Reading your routines',
@@ -117,19 +148,21 @@ export async function report($: Engine, what: Report): Promise<void> {
   const key = JSON.stringify([what.phase, what.id ?? null, what.detail ?? '', what.source ?? 'claude'])
   if (key === lastReport && what.preview === undefined) return
   lastReport = key
+  shown = { phase: what.phase, detail: what.detail ?? '' }
   const reply = await request($, link, 'POST', '/v1/activity', { ...what, session: me?.id })
   if (!reply.ok && reply.status === 0) link = null
 }
 
 export async function submitPrompt($: Engine, queued: QueuedPrompt): Promise<void> {
   const prompt = { ...queued, text: composePrompt(queued) }
-  // The note goes with what is sent; the prompt is recognized by what the person said.
-  const spoken = queued.source === 'voice' && (await loadConfig($)).live.speak !== 'off'
+  // The notes go with what is sent; the prompt is recognized by what the person said.
+  const config = await loadConfig($)
+  const notes = [personaNote(activeProfile(config)), queued.source === 'voice' && config.live.speak !== 'off' ? SPOKEN_NOTE : ''].filter(note => note !== '')
   pending.push(prompt)
   try {
     // Resolves once the turn starts, which may be a while if Claude is busy:
     // it is deliberately not awaited by the caller, so asking for new prompts goes on.
-    await $.prompt.submit({ text: spoken ? `${prompt.text}\n\n${SPOKEN_NOTE}` : prompt.text, asUser: true })
+    await $.prompt.submit({ text: [prompt.text, ...notes].join('\n\n'), asUser: true })
   } catch {
     pending = pending.filter(p => p.id !== prompt.id)
     await report($, {
@@ -184,7 +217,14 @@ export async function pump($: Engine): Promise<QueuedPrompt[]> {
     await report($, { phase: 'idle', id, source, detail: '' })
   }
   try {
-    if (reply.data.revision !== (await loadConfig($)).revision) await syncConfig($, link)
+    const local = await loadConfig($)
+    if (driftRest > 0) driftRest -= 1
+    if (reply.data.revision !== local.revision) await syncConfig($, link)
+    else if (driftRest === 0 && reply.data.key !== undefined && reply.data.key !== configKey(local)) {
+      // The same revision and not the same settings: another session wrote the shared copy back without something. The companion's copy is taken.
+      driftRest = DRIFT_REST_TICKS
+      await syncConfig($, link)
+    }
   } catch {
     // The prompts are already claimed: a failed sync is tried again next second, and must not lose them.
   }
@@ -196,6 +236,8 @@ export async function turnStarted($: Engine, e: { text: string; turnId: string; 
   if (e.agentId !== undefined) return
   runningTurn = e.turnId
   toolsRunning = 0
+  streamText = ''
+  streamSent = 0
   const text = e.text.trim()
   const index = pending.findIndex(p => p.text === text || text.includes(p.text))
   current = index >= 0 ? (pending.splice(index, 1)[0] ?? null) : null
@@ -226,6 +268,37 @@ export async function turnEnded($: Engine, e: { answer: string; reason: string; 
   await report($, { phase, id: mine?.id ?? null, source: mine ? 'bot' : 'claude', preview })
 }
 
+/**
+ * A piece of the reply has arrived. For a turn the bot itself started, what has been written so far is passed on,
+ * so the panel shows the reply growing as Claude Code's own window would. Any other turn's text stays where it is.
+ */
+export function replyPiece($: Engine, e: { agentId?: string }, piece: { kind?: string; text?: string }): void {
+  if (!current || !link || e.agentId !== undefined || piece.kind !== 'text' || typeof piece.text !== 'string') return
+  streamText += piece.text
+  if (isStreaming || streamText.length - streamSent < STREAM_STEP || streamText.trim() === '') return
+  void sendStream($).catch(() => {})
+}
+
+async function sendStream($: Engine): Promise<void> {
+  const mine = current
+  if (!mine || !link) return
+  isStreaming = true
+  try {
+    streamSent = streamText.length
+    const reply = await request($, link, 'POST', '/v1/activity', {
+      phase: shown.phase === 'working' ? 'working' : 'thinking',
+      id: mine.id,
+      source: 'bot',
+      detail: shown.phase === 'working' ? shown.detail : '',
+      preview: { text: streamText.trim().slice(0, MAX_STREAM), isError: false, partial: true },
+      session: me?.id,
+    })
+    if (!reply.ok && reply.status === 0) link = null
+  } finally {
+    isStreaming = false
+  }
+}
+
 /** Tells the companion which model the session runs on and at what effort, when that is not what it was last told. */
 async function publishModel($: Engine, id: string, effort: string | null): Promise<void> {
   if (!link || sessionUnsupported || id === '') return
@@ -247,6 +320,9 @@ async function publishModel($: Engine, id: string, effort: string | null): Promi
  */
 export async function stepStarted($: Engine, e: { model: string; effort?: unknown; agentId?: string }): Promise<void> {
   if (e.agentId !== undefined) return
+  // Each request of a turn writes its own text: what the last one said (before its tools ran) makes way for it.
+  streamText = ''
+  streamSent = 0
   knownModel = friendlyModel(e.model)
   knownEffort = effortLevel(e.effort)
   await publishModel($, e.model, knownEffort)
@@ -272,7 +348,7 @@ export async function modelCheck($: Engine): Promise<void> {
  */
 export async function commandCheck($: Engine): Promise<void> {
   if (!link || commandsUnsupported) return
-  const entries = buildCatalog(await $.command.list())
+  const entries = buildCatalog(await $.command.list(), (await identity($)).role === 'main')
   const key = JSON.stringify(entries)
   if (key === lastCommandsKey) return
   lastCommandsKey = key

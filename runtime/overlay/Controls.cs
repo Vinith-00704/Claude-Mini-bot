@@ -281,6 +281,8 @@ namespace MiniBot
         public string[] Keys = new string[0];
         public string[] Labels = new string[0];
         public string SkinForAvatars = "claude";
+        /// <summary>The art of the "custom" avatar: the bot's own pixel art, for its tile.</summary>
+        public Sprite CustomSprite;
         string selected = "";
         int hoverIndex = -1;
         readonly Dictionary<string, Bitmap> icons = new Dictionary<string, Bitmap>();
@@ -390,11 +392,12 @@ namespace MiniBot
 
         Bitmap IconFor(string avatar, int px)
         {
-            string id = avatar + SkinForAvatars + px;
+            var look = new Look { Avatar = avatar, Skin = SkinForAvatars, Sprite = avatar == "custom" ? CustomSprite : null };
+            string id = look.ArtKey + px;
             Bitmap b;
             if (!icons.TryGetValue(id, out b))
             {
-                b = Painter.RenderIcon(avatar, SkinForAvatars, Math.Max(16, px));
+                b = Painter.RenderIcon(look, Math.Max(16, px));
                 icons[id] = b;
             }
             return b;

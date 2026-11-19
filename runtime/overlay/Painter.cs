@@ -20,6 +20,13 @@ namespace MiniBot
         public bool Reduced;
         public string Size = "medium";
         public Meal Meal;        // set while it is eating something dropped on it (or waiting to)
+        public Sprite Sprite;    // the bot's own pixel art, when the avatar is "custom"
+
+        /// <summary>True for a bot that is drawn from its own pixel art.</summary>
+        public bool IsCustom { get { return Avatar == "custom" && Sprite != null; } }
+
+        /// <summary>What tells this look from another, for the pictures made of it.</summary>
+        public string ArtKey { get { return Avatar + Skin + (IsCustom ? Sprite.Key : ""); } }
     }
 
     public static class Painter
@@ -39,7 +46,13 @@ namespace MiniBot
         /// <summary>The height the drawing needs: Clawd is wider than tall (24 by 15 cells, plus a row for its shadow).</summary>
         public static int ArtHeight(string avatar, int s)
         {
-            return avatar == "clawd" ? 16 * (s / 24) : s;
+            // A "custom" bot whose art cannot be drawn is drawn as Clawd.
+            return avatar == "clawd" || avatar == "custom" ? 16 * (s / 24) : s;
+        }
+
+        public static int ArtHeight(Look look, int s)
+        {
+            return look.IsCustom ? look.Sprite.ArtHeight(s) : ArtHeight(look.Avatar, s);
         }
 
         public static int PadX(int s) { return (int)(s * 0.14f); }
@@ -49,7 +62,7 @@ namespace MiniBot
         public static Size WindowSize(Look look)
         {
             int s = BodyPx(look.Size);
-            return new Size(s + 2 * PadX(s), PadTop(s) + ArtHeight(look.Avatar, s) + (int)(s * 0.07f) + LabelHeight());
+            return new Size(s + 2 * PadX(s), PadTop(s) + ArtHeight(look, s) + (int)(s * 0.07f) + LabelHeight());
         }
 
         public static bool IsAnimated(Look look, string phase, bool listening)
@@ -96,7 +109,7 @@ namespace MiniBot
                 float x0 = PadX(s), y0 = PadTop(s);
                 DrawCharacter(g, x0, y0, s, look, phase, listening, t);
                 if (look.Meal != null && !look.Reduced) DrawFlyingFile(g, x0, y0, s, look);
-                if (showName) DrawName(g, look.Name, size.Width, y0 + ArtHeight(look.Avatar, s) + s * 0.06f);
+                if (showName) DrawName(g, look.Name, size.Width, y0 + ArtHeight(look, s) + s * 0.06f);
             }
             return bmp;
         }
@@ -109,11 +122,20 @@ namespace MiniBot
         /// <summary>A still face for small tiles and the tray icon.</summary>
         public static Bitmap RenderIcon(string avatar, string skin, int px)
         {
+            return RenderIcon(new Look { Avatar = avatar, Skin = skin }, px);
+        }
+
+        /// <summary>The same for a look, which may be a bot's own pixel art.</summary>
+        public static Bitmap RenderIcon(Look of, int px)
+        {
             var bmp = new Bitmap(px, px, PixelFormat32());
             using (var g = Smooth(bmp))
             {
-                var look = new Look { Avatar = avatar, Skin = skin, Idle = "none", Reduced = true };
-                DrawCharacter(g, px * 0.04f, px * 0.04f, px * 0.92f, look, "idle", false, 0);
+                var look = new Look { Avatar = of.Avatar, Skin = of.Skin, Sprite = of.Sprite, Idle = "none", Reduced = true };
+                float s = px * 0.92f;
+                // Pixel art is centred in the tile: it need not be as tall as it is wide.
+                float top = look.IsCustom ? Math.Max(px * 0.04f, (px - look.Sprite.ArtHeight(s)) / 2f) : px * 0.04f;
+                DrawCharacter(g, px * 0.04f, top, s, look, "idle", false, 0);
             }
             return bmp;
         }
@@ -124,7 +146,8 @@ namespace MiniBot
             var pose = look.Meal.Pose();
             if (pose.Fly < 0 || pose.Fly >= 1) return;
             float p = (float)(pose.Fly * pose.Fly);   // it speeds up as it nears the mouth
-            PointF mouth = look.Avatar == "clawd" ? Clawd.MouthAt(x0, y0, s) : new PointF(x0 + s / 2f, y0 + s * 0.68f);
+            PointF mouth = look.IsCustom ? new PointF(x0 + s / 2f, y0 + look.Sprite.ArtHeight(s) * 0.55f)
+                : look.Avatar == "clawd" || look.Avatar == "custom" ? Clawd.MouthAt(x0, y0, s) : new PointF(x0 + s / 2f, y0 + s * 0.68f);
             PointF from = look.Meal.From.HasValue ? look.Meal.From.Value : new PointF(mouth.X + s * 0.12f, y0 - s * 0.24f);
             float x = from.X + (mouth.X - from.X) * p;
             float y = from.Y + (mouth.Y - from.Y) * p - (float)Math.Sin(Math.PI * p) * s * 0.10f;
@@ -173,7 +196,13 @@ namespace MiniBot
 
         public static void DrawCharacter(Graphics g, float x0, float y0, float s, Look look, string phase, bool listening, double t)
         {
-            if (look.Avatar == "clawd")
+            if (look.IsCustom)
+            {
+                look.Sprite.Draw(g, x0, y0, s, look, phase, listening, t);
+                DrawMark(g, x0, y0, s, phase, listening, Ui.AccentColor(look.Accent), t, look.Reduced);
+                return;
+            }
+            if (look.Avatar == "clawd" || look.Avatar == "custom")
             {
                 Clawd.Draw(g, x0, y0, s, look, phase, listening, t);
                 DrawMark(g, x0, y0, s, phase, listening, Ui.AccentColor(look.Accent), t, look.Reduced);

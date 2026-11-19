@@ -15,7 +15,7 @@ export async function editField($: Engine, field: Field, profileId: string): Pro
   let raw: string | undefined
 
   if (field.kind === 'text') {
-    const extra = field.id === 'notes' ? 'Clear notes' : ['panel-size', 'hotkey', 'talk-key', 'look-key', 'computer-stop-key', 'assistant-model', 'voice-name'].includes(field.id) ? 'Reset to default' : 'Cancel'
+    const extra = field.id === 'notes' ? 'Clear notes' : ['panel-size', 'hotkey', 'talk-key', 'look-key', 'summarize-key', 'terminal-key', 'computer-stop-key', 'assistant-model', 'voice-name'].includes(field.id) ? 'Reset to default' : 'Cancel'
     const hints: Record<string, string> = {
       hotkey: ' Type a shortcut like Ctrl+Alt+H, or "off", under "Other".',
       'talk-key': ' Type a shortcut like Ctrl+Alt+Space, or "off", under "Other".',

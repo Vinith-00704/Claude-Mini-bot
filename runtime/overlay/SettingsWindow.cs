@@ -67,6 +67,10 @@ namespace MiniBot
         ContextMenuStrip botMenu;
         readonly RoundField name = new RoundField();
         readonly Panel preview = new Panel();
+        static readonly string[] Avatars = { "clawd", "blob", "robot", "cat", "ghost", "bunny" };
+        static readonly string[] Skins = { "claude", "sunrise", "ocean", "forest", "berry", "slate" };
+        static readonly string[] Accents = { "claude", "blue", "green", "pink", "orange", "purple" };
+        Sprite editingSprite;   // the pixel art of the bot being edited, if it has any
         readonly ChoiceStrip avatar = new ChoiceStrip();
         readonly ChoiceStrip skin = new ChoiceStrip();
         readonly ChoiceStrip accent = new ChoiceStrip();
@@ -124,11 +128,11 @@ namespace MiniBot
             y += Ui.Px(162);
 
             avatar.Mode = ChoiceStrip.Style.Avatar;
-            avatar.Keys = new[] { "clawd", "blob", "robot", "cat", "ghost", "bunny" };
+            avatar.Keys = Avatars;
             skin.Mode = ChoiceStrip.Style.Color;
-            skin.Keys = new[] { "claude", "sunrise", "ocean", "forest", "berry", "slate" };
+            skin.Keys = Skins;
             accent.Mode = ChoiceStrip.Style.Color;
-            accent.Keys = new[] { "claude", "blue", "green", "pink", "orange", "purple" };
+            accent.Keys = Accents;
             size.Keys = new[] { "small", "medium", "large" };
             size.Labels = new[] { "Small", "Medium", "Large" };
             anim.Keys = new[] { "none", "subtle", "lively" };
@@ -328,6 +332,12 @@ namespace MiniBot
             draft.Clear();
             foreach (var kv in Flatten(current)) { baseline[kv.Key] = kv.Value; draft[kv.Key] = kv.Value; }
             name.Box.Text = draft["name"];
+            // A bot made from a description has its own pixel art and may have colours of its own: they are choices here beside the built-in ones.
+            editingSprite = Sprite.From(current);
+            avatar.CustomSprite = editingSprite;
+            avatar.Keys = editingSprite != null ? Avatars.Concat(new[] { "custom" }).ToArray() : Avatars;
+            skin.Keys = draft["skin"].StartsWith("#") ? Skins.Concat(new[] { draft["skin"] }).ToArray() : Skins;
+            accent.Keys = draft["accent"].StartsWith("#") ? Accents.Concat(new[] { draft["accent"] }).ToArray() : Accents;
             avatar.SkinForAvatars = draft["skin"]; avatar.ClearIcons();
             avatar.Selected = draft["avatar"];
             skin.Selected = draft["skin"];
@@ -466,6 +476,7 @@ namespace MiniBot
             var look = new Look
             {
                 Avatar = draft.ContainsKey("avatar") ? draft["avatar"] : "clawd",
+                Sprite = editingSprite,
                 Skin = draft.ContainsKey("skin") ? draft["skin"] : "claude",
                 Accent = draft.ContainsKey("accent") ? draft["accent"] : "claude",
                 Name = draft.ContainsKey("name") && draft["name"].Trim().Length > 0 ? draft["name"].Trim() : "Mini",

@@ -8,6 +8,12 @@ import type { CommandInfo } from 'claude-code'
 // Commands the bot does not run, because the floating bot promises never to change these: Claude
 // Code's permission rules, the model and effort, the sign-in, and the session itself.
 export const BLOCKED = new Set(['permissions', 'allowed-tools', 'model', 'effort', 'config', 'hooks', 'login', 'logout', 'exit', 'quit'])
+// In Mini's own session two of them are the person's to run from the bot, as they would at its terminal: it is their
+// assistant's session and nobody else is working in it. In a terminal session the bot still leaves both alone.
+export const MAIN_ONLY = new Set(['model', 'effort'])
+
+/** Whether the bot refuses to run a command in this session. */
+export const isBlocked = (name: string, isMain: boolean): boolean => BLOCKED.has(name.toLowerCase()) && !(isMain && MAIN_ONLY.has(name.toLowerCase()))
 
 export type CatalogEntry = {
   name: string
@@ -28,6 +34,9 @@ const OWN: CatalogEntry[] = [
   { name: 'mini-bot permissions status', description: 'See which access is granted', source: 'bot' },
   { name: 'mini-bot permissions revoke all', description: 'End all screen, microphone and computer access', source: 'bot' },
   { name: 'mini-bot screenshot', description: 'Snip part of the screen and ask Claude about it', source: 'bot' },
+  { name: 'mini-bot summarize', description: 'Have Claude read the page in front and sum it up', source: 'bot' },
+  { name: 'mini-bot design', description: 'Make a new bot from a description, e.g. design a sleepy blue owl', source: 'bot', takesArgs: true },
+  { name: 'mini-bot terminal', description: "Open Claude Code's own window beside the bot", source: 'bot' },
   { name: 'mini-bot speech', description: 'Which speech recognizer is in use', source: 'bot' },
   { name: 'mini-bot update', description: 'Is a newer version out on GitHub', source: 'bot' },
   { name: 'mini-bot off', description: 'Turn Mini off until you turn it on or the PC restarts', source: 'bot' },
@@ -46,11 +55,11 @@ const OWN: CatalogEntry[] = [
 ]
 
 /** The list for the picker, in the order Claude Code's own typeahead lists it, with the bot's subcommands after `/mini-bot`. */
-export function buildCatalog(commands: readonly CommandInfo[]): CatalogEntry[] {
+export function buildCatalog(commands: readonly CommandInfo[], isMain = false): CatalogEntry[] {
   const entries: CatalogEntry[] = []
   let hasOwn = false
   for (const c of commands) {
-    if (BLOCKED.has(c.name.toLowerCase())) continue
+    if (isBlocked(c.name, isMain)) continue
     entries.push({ name: c.name, description: c.description, source: c.source })
     if (c.name === 'mini-bot') {
       entries.push(...OWN)

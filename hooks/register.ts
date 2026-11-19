@@ -7,8 +7,8 @@
 
 import type { Register } from 'claude-code'
 
-import { answerPermission, isMainSession, wasTurnedOff } from './lib/assistant'
-import { commandCheck, modelCheck, pump, stepStarted, toolFinished, toolStarted, turnEnded, turnStarted } from './lib/bridge'
+import { answerPermission, guardFullAccess, isMainSession, wasTurnedOff } from './lib/assistant'
+import { commandCheck, modelCheck, pump, replyPiece, stepStarted, toolFinished, toolStarted, turnEnded, turnStarted } from './lib/bridge'
 import { connect } from './lib/client'
 import { controlTool, endControl, serveControl, TOOLS } from './lib/computer'
 import { loadConfig } from './lib/config'
@@ -66,10 +66,11 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'mini-bot',
-      description: 'Manage your Mini Bot: hide, settings, permissions, change bot, start or stop',
-      argumentHint: '[hide|show|start|stop|status|settings|permissions|switch|create|bot|help]',
+      description: 'Manage your Mini Bot: hide, settings, permissions, change or design a bot, summarize the page in front, start or stop',
+      argumentHint: '[hide|show|start|stop|status|settings|permissions|summarize|design|terminal|switch|create|bot|help]',
     })
-    // Claude's tools for using the mouse and keyboard. Each asks the person in the bot before anything happens.
+    // Claude's tools: the mouse and keyboard, the screen, the page in front, routines, designing a bot. What touches
+    // the person's PC or changes their bot asks them in the bot first.
     for (const tool of TOOLS) {
       try {
         await $.tool.register({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema as unknown as Record<string, unknown> })
@@ -91,10 +92,20 @@ export const register: Register = on => {
   })
 
   // Each request of the main conversation names its model and effort: noted for the bot to show, never changed.
+  // Its text is passed on as it comes, for a turn the bot started, and every piece goes on exactly as it came.
   on('turn.step', async function* ($, e, next) {
     void stepStarted($, e).catch(() => {})
+    const stream = next(e)
+    for await (const piece of stream) {
+      try {
+        replyPiece($, e, piece as { kind?: string; text?: string })
+      } catch {
+        // Showing the reply early is a nicety: it never gets in the way of the reply.
+      }
+      yield piece
+    }
 
-    return yield* next(e)
+    return await stream.result
   })
 
   on('tool.call', async ($, e, next) => {
@@ -102,6 +113,9 @@ export const register: Register = on => {
     try {
       const control = controlTool(String(e.tool))
       if (control) return await serveControl($, control, e as unknown as Record<string, unknown>, next.signal)
+      // Full access is not a blank cheque: deleting, adding or changing things still goes to the person first.
+      const refused = await guardFullAccess($, e as unknown as Record<string, unknown>, next.signal)
+      if (refused) return refused
       return await next(e)
     } finally {
       void toolFinished($).catch(() => {})

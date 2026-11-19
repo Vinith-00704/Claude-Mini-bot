@@ -15,10 +15,14 @@ import {
   CONTROL_ACTIONS_RANGE,
   CONTROL_LEVELS,
   CONTROL_MINUTES_RANGE,
+  CUSTOM_AVATAR,
   DEFAULT_HOTKEY,
   DEFAULT_LOOK_KEY,
   DEFAULT_STOP_KEY,
+  DEFAULT_SUMMARIZE_KEY,
   DEFAULT_TALK_KEY,
+  DEFAULT_TERMINAL_KEY,
+  hexColor,
   IDLE_STYLES,
   MODEL_LABELS,
   modelName,
@@ -178,6 +182,41 @@ function numberField(
   }
 }
 
+/** A colour: one of the named ones, or any colour written "#3fa7d6". */
+function colorField(id: string, label: string, options: readonly string[], read: (profile: Profile) => string, patch: (value: string) => ProfilePatch): Field {
+  return {
+    id,
+    group: 'look',
+    label,
+    scope: 'profile',
+    kind: 'choice',
+    options,
+    show: (_config, profile) => read(profile),
+    apply: (config, profileId, raw) => {
+      const word = raw.trim().toLowerCase()
+      const value = options.find(o => o === word) ?? hexColor(word)
+      return value ? done(patchProfile(config, profileId, patch(value))) : { error: `${label} is one of: ${options.join(', ')}, or a colour written like #3fa7d6.` }
+    },
+  }
+}
+
+/** A shortcut that works from any program: "off" turns it off, "reset" puts its first key back. */
+function keyField(id: string, label: string, name: 'talk' | 'look' | 'summarize' | 'terminal', first: string): Field {
+  return {
+    id,
+    group: 'shortcut',
+    label,
+    scope: 'global',
+    kind: 'text',
+    show: c => c.hotkey[name],
+    apply: (config, profileId, raw) => {
+      const word = raw.trim().toLowerCase()
+      const key = word === 'reset' || word === 'default' ? first : raw.trim()
+      return send(config, profileId, { scope: 'global', patch: () => ({ hotkey: { [name]: key } }) }, key)
+    },
+  }
+}
+
 export const FIELDS: Field[] = [
   {
     id: 'name',
@@ -188,9 +227,23 @@ export const FIELDS: Field[] = [
     show: (_config, profile) => profile.name,
     apply: (config, profileId, raw) => done(patchProfile(config, profileId, { name: raw })),
   },
-  choiceField('avatar', 'look', 'Avatar', AVATARS, (_c, p) => p.avatar, { scope: 'profile', patch: avatar => ({ avatar }) }),
-  choiceField('skin', 'look', 'Skin', SKINS, (_c, p) => p.appearance.skin, { scope: 'profile', patch: skin => ({ appearance: { skin } }) }),
-  choiceField('accent', 'look', 'Accent colour', ACCENTS, (_c, p) => p.appearance.accent, { scope: 'profile', patch: accent => ({ appearance: { accent } }) }),
+  {
+    id: 'avatar',
+    group: 'look',
+    label: 'Avatar',
+    scope: 'profile',
+    kind: 'choice',
+    options: AVATARS,
+    show: (_config, profile) => (profile.avatar === CUSTOM_AVATAR ? 'custom (its own pixel art)' : profile.avatar),
+    apply: (config, profileId, raw) => {
+      const word = raw.trim().toLowerCase()
+      const avatar = [...AVATARS, CUSTOM_AVATAR].find(a => a === word)
+      if (!avatar) return { error: `Avatar is one of: ${AVATARS.join(', ')}, or custom for a bot that has pixel art of its own (/mini-bot design makes one).` }
+      return done(patchProfile(config, profileId, { avatar }))
+    },
+  },
+  colorField('skin', 'Skin', SKINS, p => p.appearance.skin, skin => ({ appearance: { skin: skin as Profile['appearance']['skin'] } })),
+  colorField('accent', 'Accent colour', ACCENTS, p => p.appearance.accent, accent => ({ appearance: { accent: accent as Profile['appearance']['accent'] } })),
   choiceField('theme', 'look', 'Panel theme', THEMES, (_c, p) => p.appearance.theme, { scope: 'profile', patch: theme => ({ appearance: { theme } }) }),
   choiceField('idle', 'animation', 'Animation intensity', IDLE_STYLES, (_c, p) => p.animation.idle, { scope: 'profile', patch: idle => ({ animation: { idle } }) }),
   choiceField('speed', 'animation', 'Animation speed', SPEEDS, (_c, p) => p.animation.speed, { scope: 'profile', patch: speed => ({ animation: { speed } }) }),
@@ -288,32 +341,10 @@ export const FIELDS: Field[] = [
       return send(config, profileId, { scope: 'global', patch: () => ({ hotkey: { toggle } }) }, toggle)
     },
   },
-  {
-    id: 'talk-key',
-    group: 'shortcut',
-    label: 'Talk key',
-    scope: 'global',
-    kind: 'text',
-    show: c => c.hotkey.talk,
-    apply: (config, profileId, raw) => {
-      const word = raw.trim().toLowerCase()
-      const talk = word === 'reset' || word === 'default' ? DEFAULT_TALK_KEY : raw.trim()
-      return send(config, profileId, { scope: 'global', patch: () => ({ hotkey: { talk } }) }, talk)
-    },
-  },
-  {
-    id: 'look-key',
-    group: 'shortcut',
-    label: 'Key that shows Claude the window in front',
-    scope: 'global',
-    kind: 'text',
-    show: c => c.hotkey.look,
-    apply: (config, profileId, raw) => {
-      const word = raw.trim().toLowerCase()
-      const look = word === 'reset' || word === 'default' ? DEFAULT_LOOK_KEY : raw.trim()
-      return send(config, profileId, { scope: 'global', patch: () => ({ hotkey: { look } }) }, look)
-    },
-  },
+  keyField('talk-key', 'Talk key', 'talk', DEFAULT_TALK_KEY),
+  keyField('look-key', 'Key that shows Claude the window in front', 'look', DEFAULT_LOOK_KEY),
+  keyField('summarize-key', 'Key that summarizes the page in front', 'summarize', DEFAULT_SUMMARIZE_KEY),
+  keyField('terminal-key', "Key that opens Claude Code's own window", 'terminal', DEFAULT_TERMINAL_KEY),
   {
     id: 'assistant-model',
     group: 'assistant',
@@ -377,7 +408,7 @@ export const FIELDS: Field[] = [
   {
     id: 'notes',
     group: 'personality',
-    label: 'Personality notes',
+    label: 'Personality notes (how the bot talks; sent to Claude with what you send from the bot)',
     scope: 'profile',
     kind: 'text',
     show: (_c, p) => (p.personality.notes === '' ? '(none)' : p.personality.notes),

@@ -11,6 +11,14 @@
 
 // 'clawd' is Claude Code's own mascot, drawn as the pixel art it is in the terminal.
 export const AVATARS = ['clawd', 'blob', 'robot', 'cat', 'ghost', 'bunny']
+// A bot drawn from its own pixel art (the profile's `sprite`), made by describing it to Claude. It is a choice only for a bot that has one.
+export const CUSTOM_AVATAR = 'custom'
+// The pixel art of such a bot: a grid of cells this many across and down, a few colours, and a picture (or a few, played in turn) for each state.
+// 'idle' is the only one a sprite must have; a state without its own picture shows the idle one, moved a little.
+export const SPRITE_SIZE_RANGE = [8, 24]
+export const SPRITE_STATES = ['idle', 'blink', 'listening', 'thinking', 'working', 'done', 'error']
+export const MAX_SPRITE_COLORS = 16
+export const MAX_SPRITE_FRAMES = 3
 // 'claude' is Claude Code's clawd_body colour, rgb(215,119,87).
 export const SKINS = ['claude', 'sunrise', 'ocean', 'forest', 'berry', 'slate']
 export const SIZES = ['small', 'medium', 'large']
@@ -34,6 +42,9 @@ export const CONTROL_MINUTES_RANGE = [1, 120]
 // Live talking: the key that starts talking and the key that shows Claude the window in front, from any program.
 export const DEFAULT_TALK_KEY = 'Ctrl+Alt+Space'
 export const DEFAULT_LOOK_KEY = 'Ctrl+Alt+Q'
+// The key that has Claude summarize the page in front, and the key that opens the real Claude Code window of Mini's own session.
+export const DEFAULT_SUMMARIZE_KEY = 'Ctrl+Alt+S'
+export const DEFAULT_TERMINAL_KEY = 'Ctrl+Alt+T'
 // When a reply is said aloud: when the person spoke the prompt, always, or never.
 export const SPEAK_MODES = ['spoken', 'always', 'off']
 export const VOICE_RATE_RANGE = [-5, 5]
@@ -65,7 +76,9 @@ export const defaultProfile = (id = 'default', name = 'Mini') => ({
 
 // 2: Claude Code's own look is the default. A stored version 1 is migrated (see normalizeConfig).
 // 3: sound effects mean something now (the chime when the bot hears its name), and are on unless the person turns them off.
-export const CONFIG_VERSION = 3
+// 4: a bot can have pixel art of its own and colours of its own, and there are two more shortcuts. A copy written by
+//    an earlier version cannot hold these (see keepWhatACopyCannotHold).
+export const CONFIG_VERSION = 4
 
 export const defaultConfig = () => ({
   version: CONFIG_VERSION,
@@ -80,7 +93,7 @@ export const defaultConfig = () => ({
   notifications: { enabled: true, onTurnComplete: false, onAccessChange: true },
   startup: { mode: 'restore', stopWithSession: false },
   display: { modelLabel: 'full' },
-  hotkey: { toggle: DEFAULT_HOTKEY, talk: DEFAULT_TALK_KEY, look: DEFAULT_LOOK_KEY },
+  hotkey: { toggle: DEFAULT_HOTKEY, talk: DEFAULT_TALK_KEY, look: DEFAULT_LOOK_KEY, summarize: DEFAULT_SUMMARIZE_KEY, terminal: DEFAULT_TERMINAL_KEY },
   // Live talking: when replies are said aloud, whether it goes on listening for a moment after a reply without its
   // name, whether what was heard waits to be checked before it is sent, and the Windows voice and its speed.
   live: { speak: 'spoken', followUp: true, review: false, voice: '', rate: 0 },
@@ -99,6 +112,72 @@ const bool = (value, fallback) => (typeof value === 'boolean' ? value : fallback
 const num = (value, min, max, fallback) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback
 const text = (value, max, fallback) => (typeof value === 'string' ? value.slice(0, max) : fallback)
+
+/** A colour written "#3fa7d6", in its one spelling, or null. */
+export const hexColor = raw => {
+  const match = /^#([0-9a-f]{6})$/i.exec(String(raw ?? '').trim())
+  return match ? '#' + match[1].toLowerCase() : null
+}
+// A colour setting is one of the named ones or any colour written as hex.
+const pickColor = (value, allowed, fallback) => (allowed.includes(value) ? value : hexColor(value) ?? fallback)
+
+/**
+ * The pixel art of a bot, checked: `{ sprite }` in its one form, or `{ error }` saying exactly what is wrong, so
+ * whoever drew it can put it right.
+ *
+ *   width, height   cells across and down (SPRITE_SIZE_RANGE)
+ *   palette         { a: '#d77757', b: '#121212', ... }: one letter or digit per colour, MAX_SPRITE_COLORS at most
+ *   frames          { idle: [...], blink: [...], listening: [...], thinking: [...], working: [...], done: [...], error: [...] }
+ *                   Each is one picture (`height` strings of `width` characters) or up to MAX_SPRITE_FRAMES of them, played in
+ *                   turn. A character is a palette key, or "." (or a space) for nothing there. Only idle is required.
+ */
+export const checkSprite = raw => {
+  const s = rec(raw)
+  const [min, max] = SPRITE_SIZE_RANGE
+  const { width, height } = s
+  if (!Number.isInteger(width) || width < min || width > max) return { error: `sprite.width is a whole number from ${min} to ${max}.` }
+  if (!Number.isInteger(height) || height < min || height > max) return { error: `sprite.height is a whole number from ${min} to ${max}.` }
+  const palette = {}
+  const entries = Object.entries(rec(s.palette))
+  if (entries.length === 0) return { error: 'sprite.palette names at least one colour, such as { "a": "#d77757" }.' }
+  if (entries.length > MAX_SPRITE_COLORS) return { error: `sprite.palette has ${MAX_SPRITE_COLORS} colours at most.` }
+  for (const [key, value] of entries) {
+    if (!/^[A-Za-z0-9]$/.test(key)) return { error: `A palette key is one letter or digit, not "${String(key).slice(0, 12)}".` }
+    const colour = hexColor(value)
+    if (!colour) return { error: `Palette colour "${key}" must be written like #3fa7d6.` }
+    palette[key] = colour
+  }
+  const given = rec(s.frames)
+  const unknown = Object.keys(given).find(k => !SPRITE_STATES.includes(k))
+  if (unknown) return { error: `"${String(unknown).slice(0, 20)}" is not a state. The states are: ${SPRITE_STATES.join(', ')}.` }
+  if (!('idle' in given)) return { error: 'sprite.frames needs "idle": the picture of the bot at rest.' }
+  const frames = {}
+  for (const state of SPRITE_STATES) {
+    if (!(state in given)) continue
+    const value = given[state]
+    if (!Array.isArray(value) || value.length === 0) return { error: `frames.${state} is a picture: ${height} strings of ${width} characters.` }
+    // One picture (its rows), or a few pictures.
+    const pictures = typeof value[0] === 'string' ? [value] : value
+    if (pictures.length > MAX_SPRITE_FRAMES) return { error: `frames.${state} has ${MAX_SPRITE_FRAMES} pictures at most.` }
+    frames[state] = []
+    for (const [n, picture] of pictures.entries()) {
+      const where = pictures.length > 1 ? `frames.${state}[${n}]` : `frames.${state}`
+      if (!Array.isArray(picture) || picture.length !== height) return { error: `${where} has ${Array.isArray(picture) ? picture.length : 0} rows; every picture has ${height} (the sprite's height).` }
+      const rows = []
+      for (const [y, row] of picture.entries()) {
+        if (typeof row !== 'string' || row.length !== width) return { error: `${where} row ${y + 1} is ${typeof row === 'string' ? row.length : 0} characters; every row is ${width} (the sprite's width).` }
+        const clean = row.replace(/ /g, '.')
+        const bad = [...clean].find(ch => ch !== '.' && !(ch in palette))
+        if (bad) return { error: `${where} row ${y + 1} uses "${bad}", which is not in the palette. Use a palette key, or "." for nothing.` }
+        rows.push(clean)
+      }
+      frames[state].push(rows)
+    }
+  }
+  const filled = frames.idle[0].join('').replace(/\./g, '').length
+  if (filled < 12) return { error: 'The idle picture is almost empty. Draw the bot with palette keys; "." is nothing.' }
+  return { sprite: { width, height, palette, frames } }
+}
 
 const MODIFIER_NAMES = { ctrl: 'Ctrl', control: 'Ctrl', alt: 'Alt', option: 'Alt', shift: 'Shift', win: 'Win', windows: 'Win', super: 'Win', meta: 'Win' }
 const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift', 'Win']
@@ -165,15 +244,19 @@ export const normalizeProfile = (raw, index = 0, legacyPosition) => {
   const animation = rec(p.animation)
   const personality = rec(p.personality)
   const panel = rec(p.panel)
+  const checked = p.sprite === undefined || p.sprite === null ? {} : checkSprite(p.sprite)
+  const sprite = 'sprite' in checked ? checked.sprite : null
   return {
     id: text(p.id, 64, '') || `profile-${index + 1}`,
     name: text(p.name, MAX_NAME, '').replace(/\s+/g, ' ').trim() || base.name,
-    avatar: pick(p.avatar, AVATARS, base.avatar),
+    // A bot keeps the pixel art it was given even while it wears another avatar, so the person can go back to it.
+    avatar: p.avatar === CUSTOM_AVATAR && sprite ? CUSTOM_AVATAR : pick(p.avatar, AVATARS, base.avatar),
+    ...(sprite ? { sprite } : {}),
     appearance: {
-      skin: pick(appearance.skin, SKINS, base.appearance.skin),
+      skin: pickColor(appearance.skin, SKINS, base.appearance.skin),
       size: pick(appearance.size, SIZES, base.appearance.size),
       opacity: num(appearance.opacity, 20, 100, base.appearance.opacity),
-      accent: pick(appearance.accent, ACCENTS, base.appearance.accent),
+      accent: pickColor(appearance.accent, ACCENTS, base.appearance.accent),
       theme: pick(appearance.theme, THEMES, base.appearance.theme),
     },
     animation: {
@@ -253,6 +336,8 @@ export const normalizeConfig = raw => {
       toggle: parseHotkey(hotkey.toggle) ?? base.hotkey.toggle,
       talk: parseHotkey(hotkey.talk) ?? base.hotkey.talk,
       look: parseHotkey(hotkey.look) ?? base.hotkey.look,
+      summarize: parseHotkey(hotkey.summarize) ?? base.hotkey.summarize,
+      terminal: parseHotkey(hotkey.terminal) ?? base.hotkey.terminal,
     },
     live: {
       speak: pick(live.speak, SPEAK_MODES, base.live.speak),
@@ -270,6 +355,51 @@ export const normalizeConfig = raw => {
     computer: normalizeComputer(c.computer, base.computer),
     wasRunning: bool(c.wasRunning, base.wasRunning),
   }
+}
+
+/**
+ * A whole copy of the settings, as Claude Code's side sends it, with what that copy cannot hold kept from the settings
+ * as they stand. A Claude Code session that was opened before an update still runs the older code, shares the stored
+ * settings with newer sessions, and writes them back without a bot's own art, its own colours or the newer shortcuts.
+ * Its silence about those is not a wish to remove them.
+ *
+ * Pixel art is only ever removed with its bot (or by a change asked for in the bot itself), so a copy that lacks the art
+ * of a bot that has some is taken for such a copy, whatever version it says it is.
+ */
+export const keepWhatACopyCannotHold = (incoming, current) => {
+  const c = rec(incoming)
+  const isOld = !(Number(c.version) >= CONFIG_VERSION)
+  const base = defaultProfile()
+  const profiles = (Array.isArray(c.profiles) ? c.profiles : []).map(raw => {
+    const p = rec(raw)
+    const mine = current.profiles.find(q => q.id === p.id)
+    if (!mine) return raw
+    const isLossy = isOld || (mine.sprite !== undefined && (p.sprite === undefined || p.sprite === null))
+    if (!isLossy) return raw
+    const a = rec(p.appearance)
+    const kept = (now, was, fallback) => (hexColor(was) && now === fallback ? was : now)
+    return {
+      ...p,
+      ...(mine.sprite ? { sprite: mine.sprite } : {}),
+      // The older code reads "custom" as the default character, so that is what it sends back.
+      avatar: mine.avatar === CUSTOM_AVATAR && p.avatar === base.avatar ? CUSTOM_AVATAR : p.avatar,
+      appearance: { ...a, skin: kept(a.skin, mine.appearance.skin, base.appearance.skin), accent: kept(a.accent, mine.appearance.accent, base.appearance.accent) },
+    }
+  })
+  const keys = rec(c.hotkey)
+  return {
+    ...c,
+    profiles,
+    ...(isOld ? { hotkey: { ...keys, summarize: keys.summarize ?? current.hotkey.summarize, terminal: keys.terminal ?? current.hotkey.terminal } } : {}),
+  }
+}
+
+/** A short mark of what the settings say (not their revision), for telling whether two copies are the same without sending either. */
+export const configKey = config => {
+  const text = JSON.stringify({ ...config, revision: 0, wasRunning: false })
+  let hash = 5381
+  for (let i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+  return `${text.length}:${hash >>> 0}`
 }
 
 /** The same choices ignoring the revision counter, for noticing a real change. */
@@ -349,23 +479,100 @@ export const deleteProfile = (config, id) => {
 
 const oneOf = (label, value, allowed) => (allowed.includes(value) ? null : `${label} is one of: ${allowed.join(', ')}.`)
 
+/**
+ * A bot as it was designed from the person's description, checked: `{ profile, isNew }`, the bot it would be (for the
+ * preview they are shown before anything changes), or `{ error }`. Nothing is changed here; adoptBot does that.
+ *
+ *   name       what it is called (a new bot needs one)
+ *   replace    the name of an existing bot to redesign; without it the design is a new bot
+ *   sprite     its own pixel art (checkSprite), or avatar: one of the built-in characters
+ *   skin, accent   a named colour or "#rrggbb";  theme, size, idle, tone, notes   as in a profile
+ */
+export const designBot = (config, spec) => {
+  const s = rec(spec)
+  const replace = typeof s.replace === 'string' ? s.replace.trim() : ''
+  const target = replace === '' ? undefined : findProfile(config, replace)
+  if (replace !== '' && !target) return { error: `There is no bot called "${replace.slice(0, MAX_NAME)}" to change. The bots are: ${config.profiles.map(p => p.name).join(', ')}.` }
+  if (!target && config.profiles.length >= MAX_PROFILES) return { error: `There are already ${MAX_PROFILES} bots. Redesign one of them (replace), or the person can delete one first.` }
+  const named = checkName(config, s.name ?? target?.name, target?.id)
+  if ('error' in named) return named
+  const patch = {}
+  if (s.sprite !== undefined && s.sprite !== null) {
+    const checked = checkSprite(s.sprite)
+    if ('error' in checked) return checked
+    patch.sprite = checked.sprite
+    patch.avatar = CUSTOM_AVATAR
+  } else if (s.avatar !== undefined && s.avatar !== null) {
+    patch.avatar = typeof s.avatar === 'string' ? s.avatar.trim().toLowerCase() : s.avatar
+    if (patch.avatar === CUSTOM_AVATAR && !target?.sprite) return { error: 'avatar "custom" needs sprite: the bot\'s own pixel art.' }
+  } else if (!target) return { error: `Give the bot a look: sprite (its own pixel art), or avatar (one of ${AVATARS.join(', ')}).` }
+  const word = value => (typeof value === 'string' ? value.trim().toLowerCase() : value)
+  const appearance = {}
+  for (const key of ['skin', 'accent', 'theme', 'size']) if (s[key] !== undefined && s[key] !== null) appearance[key] = word(s[key])
+  if (Object.keys(appearance).length > 0) patch.appearance = appearance
+  if (s.idle !== undefined && s.idle !== null) patch.animation = { idle: word(s.idle) }
+  const personality = {}
+  if (s.tone !== undefined && s.tone !== null) personality.tone = word(s.tone)
+  if (s.notes !== undefined && s.notes !== null) personality.notes = typeof s.notes === 'string' ? s.notes.replace(/\s+/g, ' ').trim() : s.notes
+  if (Object.keys(personality).length > 0) patch.personality = personality
+  const bad = checkPatch(patch)
+  if (bad) return { error: bad }
+  // A new bot stands where the one on the screen stands, at its size, with the same panel.
+  const active = activeProfile(config)
+  const base = target ?? {
+    ...defaultProfile(freshId(config, named.name), named.name),
+    appearance: { ...defaultProfile().appearance, size: active.appearance.size, opacity: active.appearance.opacity },
+    animation: { ...active.animation },
+    position: active.position,
+    panel: { ...active.panel },
+  }
+  const profile = normalizeProfile({
+    ...base,
+    name: named.name,
+    avatar: patch.avatar ?? base.avatar,
+    sprite: patch.sprite ?? base.sprite,
+    appearance: { ...base.appearance, ...appearance },
+    animation: { ...base.animation, ...rec(patch.animation) },
+    personality: { ...base.personality, ...personality },
+  })
+  return { profile, isNew: !target }
+}
+
+/** Makes a designed bot real: it is added, or takes the place of the one it redesigns, and becomes the bot on the screen. */
+export const adoptBot = (config, profile) => {
+  const made = normalizeProfile(profile)
+  const existing = config.profiles.find(p => p.id === made.id)
+  if (!existing && config.profiles.length >= MAX_PROFILES) return { error: `At most ${MAX_PROFILES} bots.` }
+  const named = checkName(config, made.name, existing?.id)
+  if ('error' in named) return named
+  const profiles = existing ? config.profiles.map(p => (p.id === made.id ? made : p)) : [...config.profiles, made]
+  return { config: { ...config, profiles, activeProfileId: made.id }, message: existing ? `${made.name} has its new look.` : `Created ${made.name} and switched to it.` }
+}
+
 /** Why a profile patch is not acceptable, or null. A patch names only what changes. */
 export const checkPatch = patch => {
   const p = rec(patch)
-  const known = ['name', 'avatar', 'appearance', 'animation', 'position', 'panel', 'personality']
+  const known = ['name', 'avatar', 'sprite', 'appearance', 'animation', 'position', 'panel', 'personality']
   const extra = Object.keys(p).find(k => !known.includes(k))
   if (extra) return `Unknown setting "${extra}".`
   if ('name' in p && typeof p.name !== 'string') return 'Name must be text.'
-  if ('avatar' in p) {
+  if ('sprite' in p && p.sprite !== null) {
+    const checked = checkSprite(p.sprite)
+    if ('error' in checked) return checked.error
+  }
+  if ('avatar' in p && p.avatar !== CUSTOM_AVATAR) {
     const bad = oneOf('Avatar', p.avatar, AVATARS)
     if (bad) return bad
   }
   const a = rec(p.appearance)
-  for (const [key, allowed] of [['skin', SKINS], ['size', SIZES], ['accent', ACCENTS], ['theme', THEMES]]) {
+  for (const [key, allowed] of [['size', SIZES], ['theme', THEMES]]) {
     if (key in a) {
       const bad = oneOf(key[0].toUpperCase() + key.slice(1), a[key], allowed)
       if (bad) return bad
     }
+  }
+  for (const [key, allowed] of [['skin', SKINS], ['accent', ACCENTS]]) {
+    if (key in a && !allowed.includes(a[key]) && !hexColor(a[key])) return `${key[0].toUpperCase() + key.slice(1)} is one of: ${allowed.join(', ')}, or a colour written like #3fa7d6.`
   }
   if ('opacity' in a && !(Number.isInteger(a.opacity) && a.opacity >= 20 && a.opacity <= 100)) return 'Opacity is a whole number from 20 to 100.'
   const n = rec(p.animation)
@@ -407,9 +614,13 @@ export const patchProfile = (config, id, patch) => {
     if ('error' in renamed) return renamed
     next = renamed.config
   }
+  // The pixel art comes with the patch, is taken away by it (null), or stays as it was.
+  const sprite = 'sprite' in patch ? patch.sprite : profile.sprite
+  if (patch.avatar === CUSTOM_AVATAR && !sprite) return { error: 'This bot has no pixel art of its own yet. Ask Claude to design one: /mini-bot design <what it should look like>.' }
   const merged = {
     ...next.profiles.find(p => p.id === id),
-    avatar: patch.avatar ?? profile.avatar,
+    avatar: patch.avatar ?? (sprite ? profile.avatar : profile.avatar === CUSTOM_AVATAR ? defaultProfile().avatar : profile.avatar),
+    sprite: sprite ?? undefined,
     appearance: { ...profile.appearance, ...rec(patch.appearance) },
     animation: { ...profile.animation, ...rec(patch.animation) },
     position: patch.position ?? profile.position,
@@ -424,7 +635,13 @@ export const patchProfile = (config, id, patch) => {
 
 const SETTINGS_KEYS = ['sound', 'notifications', 'startup', 'display', 'hotkey', 'computer', 'live', 'assistant', 'onboarded', 'visible']
 
-const HOTKEY_LABELS = { toggle: 'the hide/show shortcut', talk: 'the talk key', look: 'the key that shows Claude your window' }
+const HOTKEY_LABELS = {
+  toggle: 'the hide/show shortcut',
+  talk: 'the talk key',
+  look: 'the key that shows Claude your window',
+  summarize: 'the key that summarizes the page in front',
+  terminal: "the key that opens Claude Code's own window",
+}
 
 /** Why changed shortcuts cannot be used, or null. No two of them may be the same key, and none may be the key that stops computer control. */
 const checkHotkeys = (config, patch) => {

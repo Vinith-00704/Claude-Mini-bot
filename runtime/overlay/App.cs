@@ -80,6 +80,19 @@ namespace MiniBot
         bool warnedListening;
         // Mini's own session: its window brought up because it may be waiting for the person.
         bool sessionShownForYou;
+        // Claude Code's own window, beside the bot: its key, and whether it opens as soon as the session is there.
+        Hotkey terminalKey;
+        string terminalKeyWanted;
+        bool terminalWanted;
+        DateTime terminalWantedUntil = DateTime.MinValue;
+        int lastTerminalRequest = -1;
+        // "Summarize this page": its key, and whether a page is being read now.
+        Hotkey summarizeKey;
+        string summarizeKeyWanted;
+        bool summarizing;
+        // The preview of a bot that was designed from a description, shown with its question.
+        PreviewWindow preview;
+        string previewId;
         string lastAnnouncement;
         // Showing where: the character goes to the spot, and comes back.
         DateTime pointUntil = DateTime.MinValue;
@@ -179,6 +192,8 @@ namespace MiniBot
             {
                 Try(delegate { st = api.Apply(Op("resize", "width", width, "replyHeight", replyHeight)); });
             };
+            panel.SummarizeRequested += delegate { panel.BeginInvoke(new Action(delegate { SummarizePage("text"); })); };
+            panel.TerminalRequested += delegate { panel.BeginInvoke(new Action(delegate { ToggleTerminal(false); })); };
             panel.SettingsRequested += OpenSettings;
             panel.CloseRequested += HidePanel;
             panel.ConsentAllowed += GrantMicrophone;
@@ -219,6 +234,8 @@ namespace MiniBot
 
         void Refresh()
         {
+            // The windows are gone while the bot shuts down; a last look at the state then has nothing to draw on.
+            if (bot == null || bot.IsDisposed || panel == null || panel.IsDisposed) return;
             try
             {
                 st = api.Get("/v1/state");
@@ -247,6 +264,7 @@ namespace MiniBot
             return new Look
             {
                 Avatar = Json.Str(profile, "avatar", "clawd"),
+                Sprite = Sprite.From(profile),
                 Name = Json.Str(profile, "name", "Mini"),
                 Skin = Json.Str(a, "skin", "claude"),
                 Accent = Json.Str(a, "accent", "claude"),
@@ -278,8 +296,9 @@ namespace MiniBot
         {
             var p = ActiveProfile();
             var pos = Json.Obj(p, "position");
+            // The size of the window is part of it: a bot of another shape is put back in its corner, not left hanging off it.
             return Json.Str(p, "id") + "|" + Json.Str(pos, "anchor") + "|" + Json.Int(pos, "x") + "|" + Json.Int(pos, "y")
-                + "|" + Json.Str(Json.Obj(p, "appearance"), "size") + "|" + Screen.PrimaryScreen.WorkingArea;
+                + "|" + Json.Str(Json.Obj(p, "appearance"), "size") + "|" + Painter.WindowSize(LookOf(p)) + "|" + Screen.PrimaryScreen.WorkingArea;
         }
 
         /// <summary>Keeps the hide/show shortcut as the configuration says. A shortcut Windows refuses is reported once.</summary>
@@ -350,6 +369,7 @@ namespace MiniBot
             var c = Json.Obj(st, "computer");
             string status = Json.Str(c, "status", "off");
             controlStatus = status;
+            string previewFor = null;   // the question whose preview should be up after this, if any
             var q = Json.Obj(c, "question");
             string qid = Json.Str(q, "id");
             bool on = status != "off";
@@ -400,9 +420,11 @@ namespace MiniBot
             }
             else
             {
-                // The other questions for the person: Claude Code's permission asks, turning something on, adding a routine.
+                // The other questions for the person: Claude Code's permission asks, turning something on, adding a routine, a designed bot.
                 var card = Json.Obj(st, "card");
                 string cid = Json.Str(card, "id");
+                var designed = Json.Obj(Json.Obj(card, "preview"), "profile");
+                if (cid.Length > 0 && designed.Count > 0) { previewFor = cid; ShowPreview(cid, designed); }
                 if (cid.Length > 0)
                 {
                     if (cardId != cid)
@@ -416,6 +438,35 @@ namespace MiniBot
                 }
                 else if (cardId != null) EndCard();
             }
+            if (previewFor == null) HidePreview();
+        }
+
+        /// <summary>The designed bot, as it would look and move, beside the question that asks whether to use it.</summary>
+        void ShowPreview(string id, Dictionary<string, object> profile)
+        {
+            if (preview == null || preview.IsDisposed) preview = new PreviewWindow();
+            if (previewId != id)
+            {
+                previewId = id;
+                var a = Json.Obj(profile, "appearance");
+                preview.SetBot(LookOf(profile), Ui.PaletteFor(Json.Str(a, "theme", "dark"), Json.Str(a, "accent", "claude")), Json.Str(profile, "name", "Mini"));
+            }
+            if (!bot.Visible) return;
+            PlacePreview();
+            if (!preview.Visible) preview.Show();
+        }
+
+        void PlacePreview()
+        {
+            if (preview == null || preview.IsDisposed) return;
+            var keepClear = panel.Visible ? Rectangle.Union(panel.Bounds, bot.Bounds) : bot.Bounds;
+            preview.PlaceBeside(keepClear, Screen.FromRectangle(bot.Bounds).WorkingArea);
+        }
+
+        void HidePreview()
+        {
+            previewId = null;
+            if (preview != null && !preview.IsDisposed && preview.Visible) preview.Hide();
         }
 
         /// <summary>A question from computer control in the panel, without taking the front from the window Claude works in.</summary>
@@ -565,6 +616,15 @@ namespace MiniBot
                 bot.BeginInvoke(new Action(StartScreenshot));
             }
 
+            // Claude Code's side asked for its own window (/mini-bot terminal, or a command typed here opened something to choose from).
+            int wantsTerminal = Json.Int(Json.Obj(st, "requests"), "terminal");
+            if (lastTerminalRequest < 0) lastTerminalRequest = wantsTerminal;
+            else if (wantsTerminal > lastTerminalRequest)
+            {
+                lastTerminalRequest = wantsTerminal;
+                bot.BeginInvoke(new Action(delegate { ShowTerminal(false); }));
+            }
+
             // The slash commands Claude Code can run, for the panel's `/` list; read again only when they change.
             int commandsRevision = Json.Int(Json.Obj(st, "commands"), "revision", -1);
             if (commandsRevision != lastCommandsRevision) LoadCommands(commandsRevision);
@@ -614,13 +674,16 @@ namespace MiniBot
 
         void ShowReply(Dictionary<string, object> activity)
         {
-            var preview = Json.Obj(activity, "preview");
-            string id = Json.Str(preview, "id");
-            string text = Json.Str(preview, "text");
-            bool isError = Json.Bool(preview, "isError");
+            var reply = Json.Obj(activity, "preview");
+            string id = Json.Str(reply, "id");
+            string text = Json.Str(reply, "text");
+            bool isError = Json.Bool(reply, "isError");
+            // A reply still being written is shown as it grows; nothing is said aloud or acted on until the whole one is there.
+            bool partial = Json.Bool(reply, "partial");
             // A reply to something the bot did not send itself (a routine) is shown without the last thing it did send.
-            panel.SetConversation(id.Length == 0 || id == lastPromptId ? lastPrompt : "", text, isError);
-            if (lastReplyId == null) { lastReplyId = id; return; }
+            panel.SetConversation(id.Length == 0 || id == lastPromptId ? lastPrompt : "", text, isError, partial);
+            if (lastReplyId == null) { lastReplyId = partial ? "" : id; return; }
+            if (partial) return;
             if (id.Length == 0 || id == lastReplyId) return;
             lastReplyId = id;
             OnReply(id, text, isError);
@@ -635,6 +698,7 @@ namespace MiniBot
             if (bot.Meal != null && bot.Meal.Stage == Meal.Open && (DateTime.UtcNow - hoverAt).TotalMilliseconds > 450) bot.Meal = null;
             if (bot.Visible) bot.Redraw(t, false);
             if (panel.Visible && bot.Visible) panel.PlaceNear(bot.Bounds, Screen.FromRectangle(bot.Bounds).WorkingArea);
+            if (preview != null && !preview.IsDisposed && preview.Visible) PlacePreview();
             HarvestVoice();
             ShowNotice();
             TickLive();
@@ -653,7 +717,7 @@ namespace MiniBot
             else if (localError != null && DateTime.UtcNow < localErrorUntil) panel.SetNotice(localError, true);
             else if (localInfo != null && DateTime.UtcNow < localInfoUntil) panel.SetNotice(localInfo, false);
             else if (Json.Str(Json.Obj(st, "assistant"), "status") == "needs-you")
-                panel.SetNotice("Claude Code needs you in its window: right-click the bot, Assistant, Show Claude's window.", false);
+                panel.SetNotice("Claude Code needs you in its window: click Open Claude Code below" + (KeyHint("terminal").Length > 0 ? ", or press " + KeyHint("terminal") : "") + ".", false);
             else if (!Json.Bool(Json.Obj(st, "bridge"), "connected") && Json.Bool(Json.Obj(st, "assistant"), "wanted"))
                 panel.SetNotice("Claude Code is starting. What you send now goes to it as soon as it's ready.", false);
             else if (!Json.Bool(Json.Obj(st, "bridge"), "connected"))
@@ -1076,7 +1140,9 @@ namespace MiniBot
             currentMenu = menu;
             menu.Items.Add(panel.Visible ? "Close prompt" : "Open prompt", null, delegate { TogglePanel(); });
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("Summarize this page", null, delegate { bot.BeginInvoke(new Action(delegate { SummarizePage("text"); })); }) { ShortcutKeyDisplayString = KeyHint("summarize") });
             menu.Items.Add("Take screenshot", null, delegate { bot.BeginInvoke(new Action(StartScreenshot)); });
+            menu.Items.Add(new ToolStripMenuItem(TerminalIsShown() ? "Hide Claude Code" : "Open Claude Code", null, delegate { bot.BeginInvoke(new Action(delegate { ToggleTerminal(false); })); }) { ShortcutKeyDisplayString = KeyHint("terminal") });
             menu.Items.Add("Hide", null, delegate { SetVisible(false); });
             menu.Items.Add("Customize...", null, delegate { OpenSettings(); });
 
@@ -1242,7 +1308,9 @@ namespace MiniBot
             menu.Renderer = new ThemedMenuRenderer(CurrentPalette());
             menu.Items.Add("Show or hide the bot", null, delegate { SetVisible(!Json.Bool(Json.Obj(st, "config"), "visible", true)); });
             menu.Items.Add("Open prompt", null, delegate { if (!bot.Visible) SetVisible(true); ShowPanel(); });
+            menu.Items.Add("Summarize the page in front", null, delegate { bot.BeginInvoke(new Action(delegate { SummarizePage("text"); })); });
             menu.Items.Add("Take screenshot", null, delegate { bot.BeginInvoke(new Action(StartScreenshot)); });
+            menu.Items.Add("Open Claude Code", null, delegate { bot.BeginInvoke(new Action(delegate { ShowTerminal(true); })); });
             menu.Items.Add("Customize...", null, delegate { OpenSettings(); });
             var stopControl = new ToolStripMenuItem("Stop computer control", null, delegate { Halt("the person stopped it"); });
             menu.Items.Add(stopControl);
@@ -1276,6 +1344,10 @@ namespace MiniBot
             talkKey.Pressed += TalkPressed;
             lookKey = new Hotkey(0x4D45);
             lookKey.Pressed += delegate { bot.BeginInvoke(new Action(LookPressed)); };
+            summarizeKey = new Hotkey(0x4D46);
+            summarizeKey.Pressed += delegate { bot.BeginInvoke(new Action(delegate { SummarizePage("text"); })); };
+            terminalKey = new Hotkey(0x4D47);
+            terminalKey.Pressed += delegate { bot.BeginInvoke(new Action(delegate { ToggleTerminal(true); })); };
             pill = new NoActivateForm();
             pill.BackColor = Color.FromArgb(32, 32, 32);
             pill.Cursor = Cursors.Hand;
@@ -1309,6 +1381,9 @@ namespace MiniBot
             string talk = Json.Str(keys, "talk", "");
             SetKey(talkKey, "talk", talk, ref talkKeyWanted, "start talking");
             SetKey(lookKey, "look", Json.Str(keys, "look", ""), ref lookKeyWanted, "show Claude your window");
+            SetKey(summarizeKey, "summarize", Json.Str(keys, "summarize", ""), ref summarizeKeyWanted, "summarize the page in front");
+            SetKey(terminalKey, "terminal", Json.Str(keys, "terminal", ""), ref terminalKeyWanted, "open Claude Code's own window");
+            panel.SetShortcuts(KeyHint("summarize"), KeyHint("terminal"));
             uint mods;
             if (talk.Length > 0 && talk != "off") Hotkey.Parse(talk, out mods, out talkVk);
 
@@ -1507,6 +1582,13 @@ namespace MiniBot
                 case SpokenCommand.Done:
                     EndConversation();
                     return;
+                case SpokenCommand.Summarize:
+                    SummarizePage("voice");
+                    return;
+                case SpokenCommand.Terminal:
+                    ShowTerminal(true);
+                    EndConversation();
+                    return;
             }
             bool review = Json.Bool(Json.Obj(Json.Obj(st, "config"), "live"), "review");
             if (review)
@@ -1602,39 +1684,7 @@ namespace MiniBot
                 if (!allowed) return;
                 if (!Try(delegate { st = api.Post("/v1/permissions/screen/grant", new Dictionary<string, object> { { "confirmed", true } }); })) return;
             }
-            if (!Try(delegate { api.Post("/v1/permissions/screen/capture/start", null); })) return;
-            string path = null;
-            string label = "";
-            try
-            {
-                using (var all = ScreenGrab.Capture(new Form[] { bot, panel, badge, settings, pill }))
-                {
-                    Native.RECT r;
-                    Rectangle area = ScreenGrab.Desktop;
-                    Rectangle shot = !own && Native.GetWindowRect(front, out r) ? Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom) : area;
-                    shot.Intersect(area);
-                    if (shot.Width < 8 || shot.Height < 8) shot = area;
-                    shot.Offset(-area.X, -area.Y);
-                    string folder = Json.Str(Json.Obj(st, "paths"), "screenshots");
-                    if (folder.Length == 0) { ShowError("The companion did not say where to keep screenshots."); return; }
-                    Directory.CreateDirectory(folder);
-                    path = Path.Combine(folder, "screenshot-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".png");
-                    using (var cropped = all.Clone(shot, all.PixelFormat)) cropped.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-                    label = "window " + shot.Width + " \u00D7 " + shot.Height;
-                }
-            }
-            catch (Exception e)
-            {
-                ShowError("Could not take the screenshot: " + e.Message);
-                return;
-            }
-            finally
-            {
-                try { api.Post("/v1/permissions/screen/capture/stop", null); } catch (ApiException) { }
-            }
-            attached.RemoveAll(c => c.Kind == Chip.Shot);
-            attached.Insert(0, new Chip { Kind = Chip.Shot, Label = label, Path = path });
-            panel.SetChips(attached);
+            if (!AttachWindowPicture(own ? IntPtr.Zero : front)) return;
             if (!bot.Visible) SetVisible(true);
             ShowPanel();
             if (dict == null && Json.Bool(Json.Obj(Json.Obj(st, "permissions"), "microphone"), "granted"))
@@ -1644,6 +1694,193 @@ namespace MiniBot
             }
         }
 
+        /// <summary>Takes a picture of a window (or of the whole screen, for none) and puts it on the next prompt. The screen permission is already given.</summary>
+        bool AttachWindowPicture(IntPtr window)
+        {
+            if (!Try(delegate { api.Post("/v1/permissions/screen/capture/start", null); })) return false;
+            string path = null;
+            string label = "";
+            try
+            {
+                using (var all = ScreenGrab.Capture(new Form[] { bot, panel, badge, settings, pill, preview }))
+                {
+                    Native.RECT r;
+                    Rectangle area = ScreenGrab.Desktop;
+                    Rectangle shot = window != IntPtr.Zero && Native.GetWindowRect(window, out r) ? Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom) : area;
+                    shot.Intersect(area);
+                    if (shot.Width < 8 || shot.Height < 8) shot = area;
+                    shot.Offset(-area.X, -area.Y);
+                    string folder = Json.Str(Json.Obj(st, "paths"), "screenshots");
+                    if (folder.Length == 0) { ShowError("The companion did not say where to keep screenshots."); return false; }
+                    Directory.CreateDirectory(folder);
+                    path = Path.Combine(folder, "screenshot-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".png");
+                    using (var cropped = all.Clone(shot, all.PixelFormat)) cropped.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                    label = "window " + shot.Width + " \u00D7 " + shot.Height;
+                }
+            }
+            catch (Exception e)
+            {
+                ShowError("Could not take the screenshot: " + e.Message);
+                return false;
+            }
+            finally
+            {
+                try { api.Post("/v1/permissions/screen/capture/stop", null); } catch (ApiException) { }
+            }
+            attached.RemoveAll(c => c.Kind == Chip.Shot);
+            attached.Insert(0, new Chip { Kind = Chip.Shot, Label = label, Path = path });
+            panel.SetChips(attached);
+            return true;
+        }
+
+        // ---- "summarize this page" ----
+
+        /// <summary>The key a shortcut is on, for menus and tips; empty when it is off.</summary>
+        string KeyHint(string name)
+        {
+            string key = Json.Str(Json.Obj(Json.Obj(st, "config"), "hotkey"), name, "");
+            return key == "off" ? "" : key;
+        }
+
+        /// <summary>
+        /// The page in front is read and handed to Claude Code with the request to sum it up. This is the person asking,
+        /// here in the bot (its key, its menu, its panel, its name spoken), so the asking is the yes for this one read.
+        /// </summary>
+        void SummarizePage(string source)
+        {
+            if (summarizing) return;
+            IntPtr front = Win.GetForegroundWindow();
+            uint pid;
+            Native.GetWindowThreadProcessId(front, out pid);
+            // Asked from the bot's own menu or panel: the page is the window in front beside the bot, which the runtime works out.
+            if (pid == (uint)Process.GetCurrentProcess().Id) front = IntPtr.Zero;
+            if (!Json.Bool(Json.Obj(Json.Obj(st, "permissions"), "screen"), "granted"))
+            {
+                bool allowed = Question.Ask(CurrentPalette(), "Let " + look.Name + " read the page in front of you?",
+                    "It reads the words of the window in front only when you ask for a summary. An indicator shows while it does, and the words go to Claude with your request. " +
+                    "You can turn this off any time (right-click the bot > Permissions).",
+                    "Allow", "Not now", true);
+                if (!allowed) return;
+                if (!Try(delegate { st = api.Post("/v1/permissions/screen/grant", new Dictionary<string, object> { { "confirmed", true } }); })) return;
+            }
+            var body = new Dictionary<string, object> { { "source", source } };
+            if (front != IntPtr.Zero) body["hwnd"] = front.ToInt64();
+            string ticket = "";
+            if (!Try(delegate { ticket = Json.Str(api.Overlay("/v1/page/summarize", body), "ticket"); }))
+            {
+                if (source == "voice") { SayIt(localError ?? "That did not work."); conversation = false; }
+                else if (bot.Visible && !panel.Visible) OpenPanelForTalk();
+                return;
+            }
+            summarizing = true;
+            worker.Active = true;
+            localError = null;
+            localInfo = "Reading the page...";
+            localInfoUntil = DateTime.UtcNow.AddSeconds(30);
+            if (bot.Visible && !panel.Visible) OpenPanelForTalk();
+            var waiting = new System.Threading.Thread(delegate ()
+            {
+                Dictionary<string, object> done = null;
+                var until = DateTime.UtcNow.AddSeconds(70);
+                int misses = 0;
+                while (DateTime.UtcNow < until)
+                {
+                    try
+                    {
+                        var reply = api.Get("/v1/computer/ticket?id=" + Uri.EscapeDataString(ticket) + "&wait=2000");
+                        misses = 0;
+                        if (Json.Bool(reply, "done")) { done = reply; break; }
+                    }
+                    catch (ApiException e)
+                    {
+                        // One slow answer is not the end of it; a companion that has gone is.
+                        if (e.Status != 0 || ++misses >= 3) { done = new Dictionary<string, object> { { "ok", false }, { "error", e.Message } }; break; }
+                    }
+                }
+                ui.Post(delegate { OnSummarized(done, source); }, null);
+            }) { IsBackground = true, Name = "Summarize" };
+            waiting.Start();
+        }
+
+        void OnSummarized(Dictionary<string, object> done, string source)
+        {
+            summarizing = false;
+            localInfo = null;
+            bool spoken = source == "voice";
+            if (done != null && Json.Bool(done, "ok"))
+            {
+                lastPromptId = Json.Str(done, "promptId");
+                if (spoken) voicePromptId = lastPromptId;
+                lastPrompt = "Summarize: " + Json.Str(done, "title");
+                if (bot.Visible && !panel.Visible) OpenPanelForTalk();
+                Refresh();
+                return;
+            }
+            if (done != null && Json.Bool(done, "unreadable"))
+            {
+                // A window that keeps its words to itself: Claude gets a picture of it instead, which is only what is on the screen.
+                long handle = Json.Long(done, "hwnd");
+                if (AttachWindowPicture(handle > 0 ? new IntPtr(handle) : IntPtr.Zero))
+                {
+                    if (bot.Visible && !panel.Visible) OpenPanelForTalk();
+                    Send("Summarize what this window shows. Its words could not be read, so this is a picture of the part that is on the screen: say that it may not be the whole page.", source);
+                    return;
+                }
+            }
+            string error = done == null ? "The page took too long to read." : Json.Str(done, "error", "The page could not be read.");
+            ShowError(error);
+            if (bot.Visible && !panel.Visible) OpenPanelForTalk();
+            if (spoken) { SayIt(error); conversation = false; }
+        }
+
+        // ---- Claude Code's own window ----
+
+        bool TerminalIsShown()
+        {
+            int pid = Json.Int(Json.Obj(st, "assistant"), "pid");
+            return pid > 0 && SessionWindow.IsShown(pid);
+        }
+
+        /// <summary>
+        /// The key, the menu and the panel: Claude Code's window comes up beside the bot, or is put away. The key puts it
+        /// away only when it is the window being typed in; behind other windows, the key brings it forward instead.
+        /// </summary>
+        void ToggleTerminal(bool byKey)
+        {
+            int pid = Json.Int(Json.Obj(st, "assistant"), "pid");
+            if (pid > 0 && SessionWindow.IsShown(pid) && (!byKey || SessionWindow.IsFront(pid)))
+            {
+                terminalWanted = false;
+                SessionWindow.Hide(pid);
+                panel.SetTerminalShown(false);
+                return;
+            }
+            ShowTerminal(true);
+        }
+
+        /// <summary>Brings up the real Claude Code of Mini's own session. With none running, `mayStart` offers to start one.</summary>
+        void ShowTerminal(bool mayStart)
+        {
+            var a = Json.Obj(st, "assistant");
+            int pid = Json.Int(a, "pid");
+            var work = Screen.FromRectangle(bot.Bounds).WorkingArea;
+            if (pid > 0 && SessionWindow.Dock(pid, bot.Bounds, work)) { terminalWanted = false; return; }
+            if (!Json.Bool(a, "wanted"))
+            {
+                if (!mayStart) return;
+                bool start = Question.Ask(CurrentPalette(), "Start " + look.Name + "'s own Claude Code?",
+                    "The window that opens is a real Claude Code session that " + look.Name + " keeps running in the background: every slash command and its own voice mode work in it as in any terminal. " +
+                    "It uses your Claude plan only when you ask it something. You can turn it off any time (right-click the bot > Assistant).",
+                    "Start it", "Not now", false);
+                if (!start) return;
+                if (!Try(delegate { st = api.Post("/v1/assistant", new Dictionary<string, object> { { "on", true } }); })) return;
+            }
+            // It opens by itself as soon as the session is there.
+            terminalWanted = true;
+            terminalWantedUntil = DateTime.UtcNow.AddSeconds(90);
+            ShowInfo("Claude Code is starting. Its window opens as soon as it is ready.");
+        }
+
         // ---- Mini's own session, and what was set for a time ----
 
         void ApplySessionWindow()
@@ -1651,7 +1888,15 @@ namespace MiniBot
             var a = Json.Obj(st, "assistant");
             string status = Json.Str(a, "status");
             int pid = Json.Int(a, "pid");
-            if (status == "needs-you" && !sessionShownForYou && pid > 0 && SessionWindow.Show(pid))
+            panel.SetTerminalShown(pid > 0 && SessionWindow.IsShown(pid));
+            if (terminalWanted && DateTime.UtcNow > terminalWantedUntil) terminalWanted = false;
+            if (terminalWanted && pid > 0 && (status == "running" || status == "needs-you") && SessionWindow.Dock(pid, bot.Bounds, Screen.FromRectangle(bot.Bounds).WorkingArea))
+            {
+                terminalWanted = false;
+                sessionShownForYou = false;   // the person asked for it: it stays until they put it away
+                return;
+            }
+            if (status == "needs-you" && !sessionShownForYou && pid > 0 && SessionWindow.Dock(pid, bot.Bounds, Screen.FromRectangle(bot.Bounds).WorkingArea))
             {
                 sessionShownForYou = true;
                 tray.ShowBalloonTip(10000, "Claude Mini Bot", "Claude Code needs you in the window that just opened. The first time, that is saying yes to the folder it runs in. It hides again once it has started.", ToolTipIcon.Info);
@@ -1720,9 +1965,9 @@ namespace MiniBot
             if (pid > 0)
             {
                 bool shown = SessionWindow.IsShown(pid);
-                menu.DropDownItems.Add(shown ? "Hide Claude's window" : "Show Claude's window", null, delegate
+                menu.DropDownItems.Add(shown ? "Hide Claude Code's window" : "Open Claude Code's window", null, delegate
                 {
-                    if (shown) SessionWindow.Hide(pid); else SessionWindow.Show(pid);
+                    if (shown) { terminalWanted = false; SessionWindow.Hide(pid); } else ShowTerminal(true);
                 });
             }
 
@@ -1842,6 +2087,9 @@ namespace MiniBot
             if (hotkey != null) hotkey.Dispose();
             if (talkKey != null) talkKey.Dispose();
             if (lookKey != null) lookKey.Dispose();
+            if (summarizeKey != null) summarizeKey.Dispose();
+            if (terminalKey != null) terminalKey.Dispose();
+            if (preview != null && !preview.IsDisposed) preview.Dispose();
             if (wake != null) wake.Dispose();
             if (speaker != null) speaker.Dispose();
             Microsoft.Win32.SystemEvents.SessionSwitch -= OnSessionSwitch;

@@ -68,6 +68,8 @@ namespace MiniBot
                 case "look": return Look(args);
                 case "probe": return Probe(args);
                 case "act": return Act(args);
+                case "page-probe": return PageProbe(args);
+                case "page": return ReadPage(args);
                 case "point":
                     if (Pointed != null) Pointed(Target(args, "x", "y"), Json.Str(args, "label"), Json.Int(args, "seconds", 12));
                     return new Dictionary<string, object>();
@@ -219,6 +221,55 @@ namespace MiniBot
         static Dictionary<string, object> PointObj(Point p)
         {
             return new Dictionary<string, object> { { "x", p.X }, { "y", p.Y } };
+        }
+
+        // ---- the page in front, as words ----
+
+        /// <summary>Which window "the page in front" is: the one the person had in front, the one named, or the front-most one that may be read.</summary>
+        Dictionary<string, object> PageProbe(Dictionary<string, object> args)
+        {
+            var never = new HashSet<string>(Json.Arr(args, "skip").OfType<string>(), StringComparer.OrdinalIgnoreCase);
+            IntPtr found = IntPtr.Zero;
+            long asked = Json.Long(args, "hwnd");
+            string named = Json.Str(args, "window");
+            if (asked > 0)
+            {
+                var hwnd = Win.GetAncestor(new IntPtr(asked), Win.GA_ROOT);
+                if (hwnd != IntPtr.Zero && Native.IsWindowVisible(hwnd) && !Native.IsIconic(hwnd) && Pid(hwnd) != ownPid) found = hwnd;
+            }
+            if (found == IntPtr.Zero && named.Length > 0) found = FindWindow(named);
+            if (found == IntPtr.Zero && named.Length == 0)
+            {
+                foreach (var hwnd in TopWindows())
+                {
+                    if (Pid(hwnd) == ownPid || Native.IsIconic(hwnd)) continue;
+                    // The desktop itself, and windows that are never read: the page is whatever lies in front beside them.
+                    string process = ProcessName(AppPid(hwnd));
+                    if (never.Contains(process) || (process.Equals("explorer", StringComparison.OrdinalIgnoreCase) && Title(hwnd) == "Program Manager")) continue;
+                    found = hwnd;
+                    break;
+                }
+            }
+            var d = new Dictionary<string, object> { { "found", found != IntPtr.Zero } };
+            if (found != IntPtr.Zero)
+            {
+                d["hwnd"] = found.ToInt64();
+                d["title"] = Clip(Title(found), 120);
+                d["process"] = ProcessName(AppPid(found));
+            }
+            return d;
+        }
+
+        Dictionary<string, object> ReadPage(Dictionary<string, object> args)
+        {
+            long handle = Json.Long(args, "hwnd");
+            if (handle <= 0) throw new StepException("There is no window to read.");
+            var hwnd = new IntPtr(handle);
+            if (!Native.IsWindowVisible(hwnd) || Pid(hwnd) == ownPid) throw new StepException("That window is no longer there.");
+            int max = Math.Max(1000, Math.Min(Json.Int(args, "max", 60000), 200000));
+            var page = Within(delegate { return PageReader.Read(hwnd, max, 14000); }, 16500);
+            if (page == null) throw new StepException("The page took too long to read.");
+            return new Dictionary<string, object> { { "text", page.Text }, { "url", page.Url }, { "truncated", page.Truncated }, { "how", page.How } };
         }
 
         // ---- windows ----

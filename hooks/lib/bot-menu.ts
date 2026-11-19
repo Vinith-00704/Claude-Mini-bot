@@ -3,6 +3,7 @@
 // A profile is a look and a name. Changing it only changes what the overlay
 // draws; the Claude Code session is not reset, replaced or even asked.
 
+import { designCommand } from './assistant'
 import { loadConfig } from './config'
 import { commit } from './lifecycle'
 import { PROFILE_GROUPS } from './fields'
@@ -43,6 +44,7 @@ export async function botMenu($: Engine): Promise<void> {
   const actions = [
     { label: 'Select a bot', value: 'select' },
     { label: 'Create a bot', value: 'create' },
+    { label: 'Design a bot by describing it', value: 'design' },
     { label: 'Rename a bot', value: 'rename' },
     { label: 'Customize a bot', value: 'customize' },
     { label: 'Delete a bot', value: 'delete' },
@@ -60,6 +62,13 @@ export async function botMenu($: Engine): Promise<void> {
     if (picked.value === 'create') {
       await createBot($, config)
       continue
+    }
+    if (picked.value === 'design') {
+      // Claude draws it and shows a preview beside the bot; nothing changes until the person says yes there.
+      const what = await ask($, 'What should the bot be? Describe it under "Other": how it looks, its colours, how it talks.', ['Cancel'], 'Design a bot')
+      if (what === undefined || what === 'Cancel' || what.trim() === '') continue
+      $.ui.log(await designCommand($, [what]))
+      return
     }
     const profile = await choose($, `Which bot to ${picked.value}?`, config, 'Change Bot')
     if (!profile) continue

@@ -131,7 +131,7 @@ namespace MiniBot
             Look.Meal = Meal;
             if ((Meal != null) != hadMeal) { hadMeal = Meal != null; force = true; }   // draw the last frame of a meal, and the plain bot after it
             bool animated = Painter.IsAnimated(Look, Phase, Listening);
-            string key = Look.Avatar + Look.Skin + Look.Accent + Look.Name + Look.Size + Look.Idle + Look.Speed + Look.Reduced
+            string key = Look.ArtKey + Look.Accent + Look.Name + Look.Size + Look.Idle + Look.Speed + Look.Reduced
                 + Phase + Listening + Opacity100;
             if (!force && !animated && key == lastKey) return;
             lastKey = key;

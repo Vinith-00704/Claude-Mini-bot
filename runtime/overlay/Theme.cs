@@ -58,9 +58,22 @@ namespace MiniBot
 
         public static Color Rgb(int r, int g, int b) { return Color.FromArgb(r, g, b); }
 
+        /// <summary>A colour written "#3fa7d6": a bot made from a description can have any colour, not only the named ones.</summary>
+        static bool TryHex(string name, out Color colour)
+        {
+            colour = Color.Empty;
+            if (name == null || name.Length != 7 || name[0] != '#') return false;
+            try { colour = ColorTranslator.FromHtml(name); return true; }
+            catch (Exception) { return false; }
+        }
+
+        static float Luma(Color c) { return (0.2126f * c.R + 0.7152f * c.G + 0.0722f * c.B) / 255f; }
+
         /// <summary>The body colour of the character. 'claude' is Claude Code's clawd_body.</summary>
         public static Color Skin(string name)
         {
+            Color own;
+            if (TryHex(name, out own)) return own;
             switch (name)
             {
                 case "sunrise": return Hex("#F4A259");
@@ -74,6 +87,8 @@ namespace MiniBot
 
         public static Color AccentColor(string name)
         {
+            Color own;
+            if (TryHex(name, out own)) return own;
             switch (name)
             {
                 case "blue": return Hex("#4C8DFF");
@@ -98,6 +113,10 @@ namespace MiniBot
         {
             bool light = theme == "light";
             var a = AccentColor(accent);
+            // A colour of the person's own choosing still has to show against the panel, and carry text.
+            if (!light && Luma(a) < 0.2f) a = Lighten(a, 0.4f);
+            else if (light && Luma(a) > 0.85f) a = Darken(a, 0.35f);
+            var onAccent = Luma(a) > 0.66f ? Rgb(24, 24, 24) : Color.White;
             // Claude Code's own shimmer for its own colour; a computed one for the others.
             var shimmer = accent == "claude" || accent == null || accent == ""
                 ? (light ? Rgb(245, 149, 117) : Rgb(235, 159, 127))
@@ -109,7 +128,7 @@ namespace MiniBot
                     IsDark = false,
                     Bg = Rgb(255, 255, 255), Fg = Rgb(0, 0, 0), Muted = Rgb(102, 102, 102), Subtle = Rgb(175, 175, 175),
                     Field = Rgb(245, 245, 245), UserMessage = Rgb(240, 240, 240), Border = Rgb(138, 138, 138),
-                    Accent = a, Shimmer = shimmer, AccentText = Color.White,
+                    Accent = a, Shimmer = shimmer, AccentText = onAccent,
                     Success = Rgb(44, 122, 57), Warning = Rgb(150, 108, 30), Danger = Rgb(171, 43, 63), Permission = Rgb(87, 105, 247)
                 };
             }
@@ -118,7 +137,7 @@ namespace MiniBot
                 IsDark = true,
                 Bg = Rgb(0, 0, 0), Fg = Rgb(255, 255, 255), Muted = Rgb(153, 153, 153), Subtle = Rgb(80, 80, 80),
                 Field = Rgb(38, 38, 38), UserMessage = Rgb(55, 55, 55), Border = Rgb(136, 136, 136),
-                Accent = a, Shimmer = shimmer, AccentText = Color.White,
+                Accent = a, Shimmer = shimmer, AccentText = onAccent,
                 Success = Rgb(78, 186, 101), Warning = Rgb(255, 193, 7), Danger = Rgb(255, 107, 128), Permission = Rgb(177, 185, 249)
             };
         }

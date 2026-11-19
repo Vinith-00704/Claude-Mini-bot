@@ -17,7 +17,7 @@ export const LABELS: Record<Kind, string> = {
 }
 
 const WHAT: Record<Kind, string> = {
-  screen: 'see your screen',
+  screen: 'see your screen and read the page in front',
   microphone: 'listen through your microphone',
   computer: 'control your computer (mouse and keyboard)',
 }

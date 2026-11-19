@@ -23,7 +23,10 @@ export class Activity {
     this.#now = now
   }
 
-  /** `preview` is `{ text, isError }` for a turn the bot started; `undefined` leaves it, `null` clears it. */
+  /**
+   * `preview` is `{ text, isError }` for a turn the bot started; `undefined` leaves it, `null` clears it.
+   * `partial` marks a reply still being written: it is shown as it grows, and nothing acts on it until the whole one comes.
+   */
   set({ phase, id = null, detail = '', source = 'claude', preview } = {}) {
     if (!PHASES.includes(phase)) throw fail(400, `phase is one of: ${PHASES.join(', ')}`)
     this.#current = {
@@ -35,7 +38,7 @@ export class Activity {
     }
     if (preview === null) this.#preview = null
     else if (preview !== undefined) {
-      this.#preview = { text: String(preview.text ?? '').slice(0, MAX_PREVIEW), isError: preview.isError === true, id: this.#current.id }
+      this.#preview = { text: String(preview.text ?? '').slice(0, MAX_PREVIEW), isError: preview.isError === true, id: this.#current.id, ...(preview.partial === true ? { partial: true } : {}) }
     }
   }
 

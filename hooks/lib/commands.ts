@@ -2,7 +2,7 @@
 // everything the menu does can also be typed, which is also what works where
 // no one can answer a dialog.
 
-import { assistantCommand, autostartCommand, fullAccessCommand, listenCommand, routinesCommand, addRoutineCommand, describeAssistant } from './assistant'
+import { assistantCommand, autostartCommand, designCommand, fullAccessCommand, listenCommand, routinesCommand, addRoutineCommand, describeAssistant, summarizeCommand, terminalCommand } from './assistant'
 import { botMenu, createBot } from './bot-menu'
 import { isRuntimeOutdated } from './bridge'
 import { connect, getState, request } from './client'
@@ -33,7 +33,7 @@ const HELP = `Mini Bot: your floating character. Claude Code stays the intellige
   /mini-bot autostart [on|off]      whether Mini starts with your PC
   /mini-bot assistant [on|off|restart|show]  Mini's own Claude Code session in the background
   /mini-bot listen [on|off]         listen for the bot's name ("Hey Mini")
-  /mini-bot full-access [on|off]    let Claude use your mouse and keyboard in any app without asking
+  /mini-bot full-access [on|off]    let Claude use your mouse and keyboard in any app without asking about each step (it still asks before deleting, adding or sending)
   /mini-bot routines [remove <n>]   your reminders and routines
   /mini-bot remind "<when>" <text>  a reminder, e.g. remind "in 20 minutes" stretch
   /mini-bot routine "<when>" <text> a prompt for Claude at a time, e.g. routine "daily 09:00" brief me
@@ -43,6 +43,9 @@ const HELP = `Mini Bot: your floating character. Claude Code stays the intellige
   /mini-bot permissions             see, grant or revoke screen, microphone and computer access
   /mini-bot permissions grant|revoke <screen|microphone|computer|all>
   /mini-bot screenshot              snip part of the screen and ask Claude about it
+  /mini-bot summarize [what for]    have Claude read the page in front and sum it up
+  /mini-bot design <description>    make a new bot from your words, e.g. design a sleepy blue owl, calm and brief
+  /mini-bot terminal                open Claude Code's own window beside the bot (Mini's own session)
   /mini-bot speech [install [small]]  check, or set up, accurate offline speech recognition
   /mini-bot update                  is a newer version out on GitHub, and how to install it
   /mini-bot control stop            take the mouse and keyboard back from Claude at once
@@ -60,7 +63,7 @@ async function describeStatus($: Engine): Promise<string> {
   const profile = activeProfile(config)
   const shown = state ? state.overlay.visible : config.visible
   const lines = [
-    `Mini Bot is ${state ? 'running' : 'stopped'} and ${shown ? 'visible' : 'hidden'}. Active bot: ${profile.name} (${profile.avatar}, ${profile.appearance.skin}).`,
+    `Mini Bot is ${state ? 'running' : 'stopped'} and ${shown ? 'visible' : 'hidden'}. Active bot: ${profile.name} (${describeLook(profile)}).`,
     ...describeAccess(state),
   ]
   if (config.hotkey.toggle !== 'off') {
@@ -72,6 +75,11 @@ async function describeStatus($: Engine): Promise<string> {
           ? `Hide/show shortcut ${config.hotkey.toggle} does not work: another program already uses it. Pick another with /mini-bot set hotkey ctrl+alt+j.`
           : `Hide/show shortcut: ${config.hotkey.toggle} (/mini-bot set hotkey changes it).`,
     )
+  }
+  for (const [name, what] of [['summarize', 'Summarize the page in front'], ['terminal', "Open Claude Code's own window"]] as const) {
+    const key = config.hotkey[name]
+    if (key === 'off') continue
+    lines.push(state?.keys?.[name]?.ok === false ? `${what}: ${key} does not work, another program already uses it. Pick another with /mini-bot set ${name}-key ctrl+alt+j.` : `${what}: ${key} (/mini-bot set ${name}-key changes it).`)
   }
   lines.push(...describeAssistant(state))
   const control = state?.computer
@@ -92,6 +100,11 @@ async function describeStatus($: Engine): Promise<string> {
   }
   if (state && state.version < 3) lines.push('The companion is from before the bot could list slash commands when you type /: /mini-bot stop, then /mini-bot start.')
   return lines.join('\n')
+}
+
+/** A bot's look in a few words, for lists. */
+function describeLook(profile: { avatar: string; appearance: { skin: string } }): string {
+  return profile.avatar === 'custom' ? 'its own pixel art' : `${profile.avatar}, ${profile.appearance.skin}`
 }
 
 async function listSettings($: Engine): Promise<string> {
@@ -141,7 +154,7 @@ async function bots($: Engine, args: string[]): Promise<string> {
     await botMenu($)
     return 'Bot menu closed.'
   }
-  if (verb === 'list') return config.profiles.map(p => `${p.id === config.activeProfileId ? '* ' : '  '}${p.name} (${p.avatar}, ${p.appearance.skin})`).join('\n')
+  if (verb === 'list') return config.profiles.map(p => `${p.id === config.activeProfileId ? '* ' : '  '}${p.name} (${describeLook(p)})`).join('\n')
   if (verb === 'new') {
     const copy = rest.includes('--copy')
     const name = rest.filter(w => w !== '--copy').join(' ')
@@ -212,6 +225,16 @@ export async function runCommand($: Engine, input: string): Promise<string> {
       case 'screenshot':
       case 'snip':
         return askForScreenshot($)
+      case 'summarize':
+      case 'summarise':
+      case 'summary':
+        return summarizeCommand($, args)
+      case 'design':
+        return designCommand($, args)
+      case 'terminal':
+      case 'claude':
+      case 'cli':
+        return terminalCommand($)
       case 'speech':
       case 'voice':
         return speechCommand($, args)

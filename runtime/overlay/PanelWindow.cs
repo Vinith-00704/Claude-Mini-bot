@@ -26,6 +26,8 @@ namespace MiniBot
         public event Action<int> ChipRemoved;              // the x on an attachment chip: its position in the row
         public event Action<string[]> FilesDropped;        // files or folders dropped on the panel, or pasted from the clipboard
         public event Action DropHover;                     // a drag with files is over the panel (again and again while it stays)
+        public event Action SummarizeRequested;            // "Summarize this page" under the prompt
+        public event Action TerminalRequested;             // "Open Claude Code" under the prompt
         public event Action SettingsRequested;
         public event Action CloseRequested;
         public event Action ConsentAllowed;
@@ -64,6 +66,10 @@ namespace MiniBot
         readonly ModelLabel modelLbl = new ModelLabel();
         readonly CommandList picker = new CommandList();
         readonly IconButton btnSend = new IconButton("send");
+        // Two things the bot does that are not a prompt, as plain words under the prompt line.
+        readonly Label lnkSummarize = new Label { Text = "Summarize this page" };
+        readonly Label lnkTerminal = new Label { Text = "Open Claude Code" };
+        readonly Font linkFont = Ui.Mono(8.5f), linkHover = Ui.Mono(8.5f, FontStyle.Underline);
         readonly TextButton btnAllow = new TextButton("Allow");
         readonly TextButton btnNotNow = new TextButton("Not now");
         readonly TextButton btnThird = new TextButton("");
@@ -86,6 +92,7 @@ namespace MiniBot
         string promptShown = "";
         string replyShown = "";
         bool replyIsError;
+        bool wasGrowing;           // the reply shown was still being written when it was last set
         Bitmap icon;
         string iconKey = "";
         Rectangle inputRect;
@@ -161,8 +168,21 @@ namespace MiniBot
             tips.SetToolTip(btnShot, "Take a screenshot");
             tips.SetToolTip(btnSend, "Send");
             btnSend.Primary = true;
+            foreach (var link in new[] { lnkSummarize, lnkTerminal })
+            {
+                var l = link;
+                l.AutoSize = false;
+                l.Font = linkFont;
+                l.Cursor = Cursors.Hand;
+                l.AccessibleRole = AccessibleRole.Link;
+                l.MouseEnter += delegate { l.ForeColor = pal.Fg; l.Font = linkHover; };
+                l.MouseLeave += delegate { l.ForeColor = pal.Muted; l.Font = linkFont; };
+            }
+            lnkSummarize.Click += delegate { Raise(SummarizeRequested); };
+            lnkTerminal.Click += delegate { Raise(TerminalRequested); };
+            SetShortcuts("", "");
 
-            Control[] all = { meter, title, status, notice, response, input, btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend, chips, modelLbl, btnAllow, btnNotNow, btnThird, btnContinue, btnSkip, picker };
+            Control[] all = { meter, title, status, notice, response, input, btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend, lnkSummarize, lnkTerminal, chips, modelLbl, btnAllow, btnNotNow, btnThird, btnContinue, btnSkip, picker };
             foreach (var c in all) Controls.Add(c);
             btnAllow.Primary = true;
             btnContinue.Primary = true;
@@ -441,6 +461,7 @@ namespace MiniBot
             response.BackColor = p.Field; response.ForeColor = p.Fg;
             input.BackColor = p.Bg; input.ForeColor = p.Fg; input.HintColor = p.Muted;
             foreach (var b in new[] { btnExpand, btnSettings, btnClose, btnMic, btnShot, btnSend }) { b.Colors = p; b.BackColor = p.Bg; b.Invalidate(); }
+            foreach (var l in new[] { lnkSummarize, lnkTerminal }) { l.BackColor = p.Bg; l.ForeColor = p.Muted; }
             chips.Colors = p; chips.BackColor = p.Bg; chips.Invalidate();
             modelLbl.Colors = p; modelLbl.BackColor = p.Bg; modelLbl.Invalidate();
             picker.Colors = p; picker.BackColor = p.Bg; picker.Invalidate();
@@ -457,16 +478,34 @@ namespace MiniBot
             if (before != modelLbl.HasContent) Relayout();
         }
 
+        /// <summary>Whether Claude Code's own window is up, which is what its link under the prompt then puts away.</summary>
+        public void SetTerminalShown(bool shown)
+        {
+            string text = shown ? "Hide Claude Code" : "Open Claude Code";
+            if (lnkTerminal.Text == text) return;
+            lnkTerminal.Text = text;
+            if (Visible) Relayout();
+        }
+
+        /// <summary>The keys the two links under the prompt are also on (empty for none), for their tips.</summary>
+        public void SetShortcuts(string summarize, string terminal)
+        {
+            string a = "Claude reads the page in front and sums it up" + (summarize.Length > 0 ? " (" + summarize + ")" : "");
+            string b = "The real Claude Code, in its own window beside the bot" + (terminal.Length > 0 ? " (" + terminal + ")" : "");
+            if (tips.GetToolTip(lnkSummarize) != a) tips.SetToolTip(lnkSummarize, a);
+            if (tips.GetToolTip(lnkTerminal) != b) tips.SetToolTip(lnkTerminal, b);
+        }
+
         /// <summary>The bot's name and face, shown at the top of the panel.</summary>
         public void SetBot(Look look)
         {
             title.Text = look.Name;
-            string key = look.Avatar + look.Skin;
+            string key = look.ArtKey;
             if (key != iconKey)
             {
                 iconKey = key;
                 if (icon != null) icon.Dispose();
-                icon = Painter.RenderIcon(look.Avatar, look.Skin, Ui.Px(40));
+                icon = Painter.RenderIcon(look, Ui.Px(40));
                 Invalidate();
             }
         }
@@ -476,14 +515,41 @@ namespace MiniBot
             status.SetState(phase, listening, detail, id);
         }
 
-        /// <summary>The last prompt the bot sent and what Claude Code answered. Empty reply hides the box.</summary>
-        public void SetConversation(string prompt, string reply, bool isError)
+        /// <summary>
+        /// The last prompt the bot sent and what Claude Code answered. Empty reply hides the box. `growing` is a reply
+        /// still being written: what is new is added at the end and kept in view, as in Claude Code itself.
+        /// </summary>
+        public void SetConversation(string prompt, string reply, bool isError, bool growing = false)
         {
+            prompt = prompt ?? "";
+            reply = reply ?? "";
             if (prompt == promptShown && reply == replyShown && isError == replyIsError) return;
-            promptShown = prompt ?? "";
-            replyShown = reply ?? "";
-            replyIsError = isError;
-            RenderConversation();
+            // More of the reply that is being written, or the end of it: added where it stands, so the box does not jump back to the top.
+            bool more = (growing || wasGrowing) && hasResponse && prompt == promptShown && isError == replyIsError && replyShown.Length > 0
+                && reply.Length > replyShown.Length && reply.StartsWith(replyShown, StringComparison.Ordinal);
+            if (more)
+            {
+                string added = reply.Substring(replyShown.Length).Replace("\r\n", "\n");
+                replyShown = reply;
+                response.SelectionStart = response.TextLength;
+                response.SelectionColor = pal.Fg;
+                response.AppendText(added);
+                renderedText += added;
+                contentWidth = -1;
+            }
+            else
+            {
+                promptShown = prompt;
+                replyShown = reply;
+                replyIsError = isError;
+                RenderConversation();
+            }
+            if ((growing || more) && replyShown.Length > 0)
+            {
+                response.SelectionStart = response.TextLength;
+                response.ScrollToCaret();
+            }
+            wasGrowing = growing;
             bool has = replyShown.Length > 0;
             if (!has) expanded = false;
             fitWanted = autoFit && has;
@@ -868,6 +934,19 @@ namespace MiniBot
                 int pickerY = y - gap + Ui.Px(4);
                 picker.SetBounds(m, pickerY, inner, pickerH);
                 y = pickerY + pickerH + gap;
+            }
+
+            // Under the prompt, when nothing else is there: the two things the bot does that are not a prompt.
+            bool showLinks = chat && !listening && !showPicker;
+            lnkSummarize.Visible = lnkTerminal.Visible = showLinks;
+            if (showLinks)
+            {
+                int linkH = Ui.Px(18), linkY = y - gap + Ui.Px(2);
+                int first = TextRenderer.MeasureText(lnkSummarize.Text, lnkSummarize.Font).Width + Ui.Px(6);
+                int second = TextRenderer.MeasureText(lnkTerminal.Text, lnkTerminal.Font).Width + Ui.Px(6);
+                lnkSummarize.SetBounds(m, linkY, first, linkH);
+                lnkTerminal.SetBounds(m + first + Ui.Px(12), linkY, second, linkH);
+                y = linkY + linkH + gap;
             }
 
             btnContinue.Visible = btnSkip.Visible = onboarding;

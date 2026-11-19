@@ -28,7 +28,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await runtime.stop()
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 const grantAndStart = async kind => {
@@ -47,7 +47,7 @@ test('refuses requests without the token, with a wrong one, or from a browser', 
 test('runtime.json carries the port and token and goes away on stop', async () => {
   const info = JSON.parse(await readFile(join(dir, 'runtime.json'), 'utf8'))
   assert.equal(info.token, runtime.token)
-  assert.equal(info.version, 5)
+  assert.equal(info.version, 6)
   await runtime.stop()
   await assert.rejects(stat(join(dir, 'runtime.json')))
 })
@@ -184,7 +184,10 @@ test('rejects non-object config and oversized bodies', async () => {
   assert.equal((await api('PUT', '/v1/config', [1])).status, 400)
   assert.equal((await api('POST', '/v1/visibility', { visible: 'no' })).status, 400)
   assert.equal((await api('POST', '/v1/overlay/position', { x: 'a', y: 1 })).status, 400)
-  assert.equal((await api('PUT', '/v1/config', { blob: 'x'.repeat(70 * 1024) })).status, 413)
+  // The configuration may carry bots' pixel art, so it has more room than other requests; it is still bounded.
+  assert.equal((await api('PUT', '/v1/config', { blob: 'x'.repeat(70 * 1024) })).status, 200)
+  assert.equal((await api('PUT', '/v1/config', { blob: 'x'.repeat(1100 * 1024) })).status, 413)
+  assert.equal((await api('POST', '/v1/visibility', { visible: true, blob: 'x'.repeat(70 * 1024) })).status, 413)
 })
 
 test('prompts are refused while Claude Code is not picking them up', async () => {

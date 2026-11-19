@@ -4,7 +4,7 @@ import { normalizeConfig } from '../shared/config.mjs'
 
 // A stand-in for the companion, behind the mod's own `$.fs` and `$.http`. The questions it is asked are answered as the
 // test says, once polled for; `role` is how this session was started.
-const world = async ($: any, on: any, { running = true, role, offFlag = false, stored }: { running?: boolean; role?: string; offFlag?: boolean; stored?: unknown } = {}) => {
+const world = async ($: any, on: any, { running = true, role, offFlag = false, stored, full = false }: { running?: boolean; role?: string; offFlag?: boolean; stored?: unknown; full?: boolean } = {}) => {
   const requests: { method: string; path: string; body: any }[] = []
   const asked: any[] = []
   const submitted: string[] = []
@@ -61,7 +61,7 @@ const world = async ($: any, on: any, { running = true, role, offFlag = false, s
     requests.push({ method, path: url.pathname + url.search, body })
     const reply = (status: number, payload: unknown) => ({ value: { status, ok: status < 300, headers: {}, text: JSON.stringify(payload) } })
     const blank = { granted: false, grantedAt: null, active: false, activeSince: null }
-    const state = { running: true, version: 5, pid: 1, config, overlay: { visible: true }, permissions: { screen: blank, microphone: blank, computer: blank }, indicator: { visible: false, kinds: [] }, bridge: { connected: true, queued: 0 } }
+    const state = { running: true, version: 5, pid: 1, config, overlay: { visible: true }, permissions: { screen: blank, microphone: blank, computer: blank }, indicator: { visible: false, kinds: [] }, bridge: { connected: true, queued: 0 }, trust: { listen: false, full, mic: false } }
     if (url.pathname === '/v1/health') return reply(200, { ok: true, version: 5, pid: 1 })
     if (url.pathname === '/v1/prompts/claim') return reply(200, { revision: config.revision, version: 5, ...claimReply })
     if (url.pathname === '/v1/cards/ask') {
@@ -117,6 +117,41 @@ test("with no companion to ask, Mini's own session is refused, never allowed", a
   await world($, on, { role: 'main', running: false })
   const result = await permission($)
   expect(result.decision.behavior).toBe('deny')
+})
+
+const toolCall = ($: any, tool: string, input: Record<string, unknown>) => $.tool.call({ tool, ...input })
+
+test('with full access, deleting or adding files in the main session still asks in the bot', async ($, on) => {
+  const { asked, setChoice } = await world($, on, { role: 'main', full: true })
+  expect(await toolCall($, 'PowerShell', { command: 'Remove-Item C:/old/notes.txt' })).toEqual({ result: {} })
+  expect(asked[0].text).toMatch(/Full access is on/)
+  expect(asked[0].text).toMatch(/Remove-Item/)
+  setChoice('deny')
+  const denied = await toolCall($, 'Bash', { command: 'echo hi > C:/new.txt' })
+  expect(JSON.stringify(denied)).toMatch(/said no/)
+  expect(asked).toHaveLength(2)
+  const written = await toolCall($, 'Write', { file_path: 'C:/new.txt', content: 'x' })
+  expect(JSON.stringify(written)).toMatch(/said no/)
+})
+
+test('with full access, ordinary commands run without a question', async ($, on) => {
+  const { asked } = await world($, on, { role: 'main', full: true })
+  for (const command of ['Get-ChildItem C:/Users', 'dir', 'git status', 'echo hi 2>&1', 'node -v > $null', 'Get-Content notes.txt'])
+    expect(await toolCall($, 'PowerShell', { command })).toEqual({ result: {} })
+  expect(await toolCall($, 'Read', { file_path: 'C:/a.txt' })).toEqual({ result: {} })
+  expect(asked).toHaveLength(0)
+})
+
+test('without full access, or outside the main session, the bot adds no question of its own', async ($, on) => {
+  const closed = await world($, on, { role: 'main' })
+  await toolCall($, 'PowerShell', { command: 'Remove-Item a.txt' })
+  expect(closed.asked).toHaveLength(0)
+})
+
+test('a terminal session with full access trusted is not asked about either', async ($, on) => {
+  const { asked } = await world($, on, { full: true })
+  await toolCall($, 'PowerShell', { command: 'Remove-Item a.txt' })
+  expect(asked).toHaveLength(0)
 })
 
 test('each session says who it is when it asks for prompts', async ($, on) => {

@@ -64,6 +64,8 @@ const PAUSE_WAIT_MS = 5 * 60 * 1000
 const IDLE_MS = 3 * 60 * 1000
 const JOB_MS = 20 * 1000
 const TICKET_KEEP_MS = 10 * 60 * 1000
+// How much of a page is read: enough for a long article, and no more than a summary needs.
+export const MAX_PAGE_CHARS = 60000
 
 const fail = (status, error) => Object.assign(new Error(error), { status })
 const printable = text => typeof text === 'string' && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)
@@ -376,7 +378,8 @@ export class Computer {
       if (same || this.#session.full) return { ok: true, granted: true, level: this.#session.level, apps: this.#session.full ? [ANY_APP] : this.#session.apps, note: 'Control was already granted for this task.' }
       return { ok: false, granted: false, error: 'Control is already granted for another task. Call computer_stop first.' }
     }
-    if (this.#isFull()) return this.#begin(task, apps, 'free', true)
+    // Full access skips the question about which apps, never the questions about important steps (sending, deleting, buying...).
+    if (this.#isFull()) return this.#begin(task, apps, 'important', true)
     const config = this.#config()
     const first = config.computer.level
     const second = first === 'step' ? 'important' : 'step'
@@ -505,6 +508,54 @@ export class Computer {
         const seen = await this.#job('look', look)
         this.#log({ kind: 'looked' })
         return { ok: true, ...seen }
+      } finally {
+        this.#permissions.stopCapture('screen')
+        if (!held) this.#permissions.revoke('screen')
+      }
+    }))
+  }
+
+  /**
+   * The words of the page in front (a web page, a document, a PDF), with no picture and no control: what "summarize this
+   * page" reads. First the bot says which window that is; a window that is never controlled is never read either. Then,
+   * unless the person asked for it themselves in the bot (`byPerson`) or gave full access, they say yes for this one
+   * read. The access indicator shows while it is read. `after(page)` can act on what was read before the ticket answers.
+   */
+  page(body, { byPerson = false, after = page => page } = {}) {
+    const s = typeof body === 'object' && body !== null ? body : {}
+    const want = {}
+    if (s.window !== undefined && s.window !== null && s.window !== '') {
+      if (typeof s.window !== 'string' || s.window.length > 120 || !printable(s.window)) throw fail(400, 'window is a program name or part of a window title')
+      want.window = s.window.trim()
+    }
+    // The window the person had in front when they asked, as only the bot itself can say.
+    if (byPerson && Number.isSafeInteger(s.hwnd) && s.hwnd > 0) want.hwnd = s.hwnd
+    if (!this.#isOverlayAttached()) throw fail(409, 'the bot\'s window is not running: /mini-bot start')
+    return this.#ticket(this.#serial(async () => {
+      const config = this.#config()
+      const never = [...ALWAYS_BLOCKED, ...config.computer.blockedApps]
+      const found = await this.#job('page-probe', { ...want, skip: never })
+      if (!found.found) return { ok: false, error: want.window ? `No window matches "${want.window}".` : 'There is no page in front to read. Open the page or document first.' }
+      const name = appName(found.process) ?? String(found.process ?? '').toLowerCase()
+      if (never.includes(name)) return { ok: false, error: `${found.process} is never read (Claude Code runs there, or it guards passwords, security or the system, or the person blocked it).` }
+      const title = String(found.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) || label(name)
+      if (!byPerson && !this.#isFull() && !this.#session) {
+        const choice = await this.#ask('page', `Claude wants to read the page in front: "${title}" (${label(name)}). Only its words, just this once; nothing is clicked or typed.`, [
+          { id: 'allow', label: 'Let Claude read it', primary: true },
+          { id: 'deny', label: 'Not now' },
+        ], {}, GRANT_WAIT_MS)
+        if (choice !== 'allow') {
+          this.#log({ kind: 'denied', task: `reading "${title}"`, apps: [name], why: choice === 'timeout' ? 'no answer' : 'the person said no' })
+          return { ok: false, error: choice === 'timeout' ? 'The person did not answer.' : 'The person said no. Ask them to paste the part they want, or to describe it.' }
+        }
+      }
+      const held = this.#permissions.snapshot().screen.granted
+      this.#permissions.grant('screen', { confirmed: true })
+      this.#permissions.startCapture('screen')
+      try {
+        const read = await this.#job('page', { hwnd: found.hwnd, max: MAX_PAGE_CHARS })
+        this.#log({ kind: 'read', what: title, target: { process: found.process, title } })
+        return await after({ ok: true, title, process: name, app: label(name), hwnd: found.hwnd, ...read })
       } finally {
         this.#permissions.stopCapture('screen')
         if (!held) this.#permissions.revoke('screen')

@@ -57,6 +57,18 @@ namespace MiniBot
             return fallback;
         }
 
+        /// <summary>A whole number that may be too large for an int (a window's handle).</summary>
+        public static long Long(object parent, string key, long fallback = 0)
+        {
+            var v = Raw(parent, key);
+            if (v is int || v is long || v is double || v is decimal)
+            {
+                double d = Convert.ToDouble(v);
+                return d >= long.MaxValue || d <= long.MinValue ? fallback : (long)d;
+            }
+            return fallback;
+        }
+
         public static bool Bool(object parent, string key, bool fallback = false)
         {
             var v = Raw(parent, key);

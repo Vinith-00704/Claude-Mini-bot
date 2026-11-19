@@ -50,7 +50,9 @@ export async function syncConfig($: Engine, link: Link): Promise<void> {
   if (!reply.ok) return
   const local = await loadConfig($)
   if ((await hasUnsentChange($)) || local.revision > reply.data.config.revision) await commit($, local)
-  else if (reply.data.config.revision > local.revision) await adoptRuntimeConfig($, reply.data)
+  // Otherwise the companion's copy is the one that counts, also where the two differ at the same revision: another
+  // session (one still running older code) may have written the shared copy back without what it cannot hold.
+  else await adoptRuntimeConfig($, reply.data)
 }
 
 async function waitFor($: Engine, isDone: () => Promise<boolean>, ms: number) {

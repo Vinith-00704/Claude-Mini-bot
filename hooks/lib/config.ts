@@ -4,10 +4,10 @@
 // profile are in shared/config.mjs, the same file the companion runtime uses.
 // Here are only the store and a flag for changes the runtime has not seen yet.
 
-import { defaultConfig, defaultProfile, normalizeConfig, sameChoices } from '../../shared/config.mjs'
+import { configKey, defaultConfig, defaultProfile, normalizeConfig, sameChoices } from '../../shared/config.mjs'
 import type { Config, Engine } from './types'
 
-export { defaultConfig, defaultProfile, normalizeConfig, sameChoices }
+export { configKey, defaultConfig, defaultProfile, normalizeConfig, sameChoices }
 
 const STORE_KEY = 'config'
 const DIRTY_KEY = 'unsent'

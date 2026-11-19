@@ -7,8 +7,10 @@
 // begins with a slash (a path, an unknown name) is refused with a note, because Claude Code would
 // read it as a command too.
 
-import { report, submitPrompt } from './bridge'
-import { BLOCKED } from './catalog'
+import { isMainSession } from './assistant'
+import { isTurnRunning, report, submitPrompt } from './bridge'
+import { isBlocked } from './catalog'
+import { connect, request } from './client'
 import { runCommand } from './commands'
 import type { Engine, QueuedPrompt } from './types'
 
@@ -22,6 +24,20 @@ async function finish($: Engine, prompt: QueuedPrompt, text: string, isError = f
   await report($, { phase: isError ? 'error' : 'completed', id: prompt.id, source: 'bot', preview: { text, isError } })
 }
 
+// A command that has shown nothing for this long has most likely opened something to choose from.
+const PICKER_WAIT_MS = 2500
+
+/**
+ * A command typed into the bot can open something to choose from (a picker, a panel), which Claude Code draws in its own
+ * window and not here. In Mini's own session nobody is looking at that window, so the bot is asked to bring it up
+ * beside itself. A command that started a turn (a skill) has opened nothing.
+ */
+async function showItsWindow($: Engine): Promise<void> {
+  if (isTurnRunning()) return
+  const link = await connect($)
+  if (link) await request($, link, 'POST', '/v1/overlay/request', { action: 'terminal' })
+}
+
 /** Runs the prompt as a command if it is one, and says whether it was; false means send it to Claude as usual. */
 async function slashCommand($: Engine, prompt: QueuedPrompt): Promise<boolean> {
   if (prompt.source !== 'text' || (prompt.attachments?.length ?? 0) > 0) return false
@@ -29,7 +45,8 @@ async function slashCommand($: Engine, prompt: QueuedPrompt): Promise<boolean> {
   if (!parsed) return false
   const { name, args } = parsed
 
-  if (BLOCKED.has(name)) {
+  const isMain = await isMainSession($)
+  if (isBlocked(name, isMain)) {
     await finish($, prompt, `/${name} changes something the bot never touches. Run it in Claude Code itself.`, true)
     return true
   }
@@ -38,11 +55,20 @@ async function slashCommand($: Engine, prompt: QueuedPrompt): Promise<boolean> {
   if (!own && !(await $.command.list()).some(c => c.name.toLowerCase() === name)) return false
 
   await report($, { phase: 'working', id: prompt.id, source: 'bot', detail: '/' + name })
+  let isSettled = false
+  const waiting = !own && isMain ? $.clock.after(PICKER_WAIT_MS, () => (isSettled ? undefined : void showItsWindow($).catch(() => {}))) : null
   try {
     const text = own ? await runCommand($, args) : (await $.command.run({ command: name, args })).text
-    await finish($, prompt, text?.trim() || `/${name} ran. Anything it opened or printed is in Claude Code.`)
+    isSettled = true
+    const said = text?.trim() ?? ''
+    // Nothing printed: it showed a panel, or it was a prompt for Claude. The first is in its window, which comes up.
+    if (said === '' && !own && isMain) $.clock.after(600, () => void showItsWindow($).catch(() => {}))
+    await finish($, prompt, said || (isMain && !own ? `/${name} ran. If it opened something to choose from, that is in Claude Code's own window, beside the bot.` : `/${name} ran. Anything it opened or printed is in Claude Code.`))
   } catch {
     await finish($, prompt, `/${name} could not run right now. Try again in a moment.`, true)
+  } finally {
+    isSettled = true
+    waiting?.cancel()
   }
   return true
 }

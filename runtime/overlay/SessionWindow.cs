@@ -1,8 +1,11 @@
-// The console window of Mini's own Claude Code session, which nobody normally sees. The person can bring it up from
-// the bot's menu, and it comes up by itself when the session has been silent long enough that it may be waiting for
-// them (a first-time trust question, a sign-in). Only this one window is ever touched.
+// The console window of Mini's own Claude Code session, which nobody normally sees. It is the real Claude Code, so
+// everything works in it exactly as in a terminal: every slash command, every picker, its own voice mode. The person
+// brings it up beside the bot with a key, the bot's menu or the panel, and puts it away the same way. It also comes up
+// by itself when the session may be waiting for them (a first-time trust question, a sign-in, a command typed into
+// the bot that opened something to choose from). Only this one window is ever touched.
 
 using System;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -11,7 +14,7 @@ namespace MiniBot
     static class SessionWindow
     {
         const uint TH32CS_SNAPPROCESS = 2;
-        const int SW_HIDE = 0, SW_SHOWNORMAL = 1;
+        const int SW_HIDE = 0, SW_SHOWNORMAL = 1, SW_RESTORE = 9;
         const uint SWP_NOSIZE = 1, SWP_NOMOVE = 2, SWP_SHOWWINDOW = 0x40;
         static readonly IntPtr HWND_TOPMOST = new IntPtr(-1), HWND_NOTOPMOST = new IntPtr(-2);
 
@@ -95,6 +98,42 @@ namespace MiniBot
         {
             IntPtr window = Find(session);
             if (window != IntPtr.Zero) Native.ShowWindow(window, SW_HIDE);
+        }
+
+        /// <summary>Whether the session's window is the one the person is typing in.</summary>
+        public static bool IsFront(int session)
+        {
+            IntPtr window = Find(session);
+            return window != IntPtr.Zero && Native.IsWindowVisible(window) && Win.GetForegroundWindow() == window;
+        }
+
+        /// <summary>Where the window goes: beside the bot, on the side with room, at a size for working in, all of it on the screen.</summary>
+        public static Rectangle DockArea(Rectangle bot, Rectangle work)
+        {
+            int gap = Ui.Px(12);
+            int w = Math.Min(Ui.Px(980), work.Width - 2 * gap), h = Math.Min(Ui.Px(620), work.Height - 2 * gap);
+            bool botOnRight = bot.Left + bot.Width / 2 > work.Left + work.Width / 2;
+            int x = botOnRight ? bot.Left - gap - w : bot.Right + gap;
+            // Not enough room beside the bot: it goes above or below it instead, as far over as fits.
+            if (x < work.Left + gap || x + w > work.Right - gap) x = botOnRight ? work.Right - gap - w : work.Left + gap;
+            int y = bot.Bottom - h;
+            if (bot.Top + bot.Height / 2 < work.Top + work.Height / 2) y = bot.Top;
+            x = Math.Max(work.Left + gap, Math.Min(x, work.Right - gap - w));
+            y = Math.Max(work.Top + gap, Math.Min(y, work.Bottom - gap - h));
+            return new Rectangle(x, y, w, h);
+        }
+
+        /// <summary>Brings the window up beside the bot, sized for working in, with the keyboard in it where Windows allows that.</summary>
+        public static bool Dock(int session, Rectangle bot, Rectangle work)
+        {
+            IntPtr window = Find(session);
+            if (window == IntPtr.Zero) return false;
+            var area = DockArea(bot, work);
+            Native.ShowWindow(window, Native.IsIconic(window) ? SW_RESTORE : SW_SHOWNORMAL);
+            SetWindowPos(window, HWND_TOPMOST, area.X, area.Y, area.Width, area.Height, SWP_SHOWWINDOW);
+            SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            Native.SetForegroundWindow(window);
+            return true;
         }
     }
 }

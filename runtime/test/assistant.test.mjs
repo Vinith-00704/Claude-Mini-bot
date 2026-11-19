@@ -77,7 +77,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await runtime.stop()
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 const settle = (ms = 15) => new Promise(resolve => setTimeout(resolve, ms))
@@ -491,19 +491,33 @@ const giveFullAccess = async () => {
 }
 const window = process => ({ window: { process, title: 't', pid: 7, own: false, elevated: false }, point: { x: 1, y: 1 } })
 
-test('with full access a task starts with no question, in any app, and no step is asked about', async () => {
+test('with full access a task starts with no question and in any app; an ordinary step is not asked about, an important one is', async () => {
   await giveFullAccess()
   const start = await api('POST', '/v1/computer/start', { task: 'Do the thing', apps: ['notepad'] })
   const granted = await ticket(start.body.ticket)
-  assert.deepEqual([granted.granted, granted.apps], [true, ['any app']])
+  assert.deepEqual([granted.granted, granted.apps, granted.level], [true, ['any app'], 'important'])
   assert.equal((await state()).computer.full, true)
+
+  const plain = await api('POST', '/v1/computer/act', { action: 'click', why: 'open the list', x: 1, y: 1 })
+  const first = await job()
+  assert.equal(first.kind, 'probe')
+  await finish(first.id, window('outlook'))
+  const clicking = await job()
+  assert.equal(clicking.kind, 'act')
+  assert.equal((await state()).computer.question, null)
+  await finish(clicking.id, {})
+  assert.equal((await ticket(plain.body.ticket)).ok, true)
+
   const act = await api('POST', '/v1/computer/act', { action: 'click', why: 'send it', x: 1, y: 1, important: true })
   const probe = await job()
   assert.equal(probe.kind, 'probe')
   await finish(probe.id, window('outlook'))
+  await settle()
+  const { question } = (await state()).computer
+  assert.equal(question.kind, 'confirm', 'sending, deleting and the like still ask, even with full access')
+  await asOverlay('POST', '/v1/computer/answer', { id: question.id, choice: 'allow' })
   const doing = await job()
   assert.equal(doing.kind, 'act')
-  assert.equal((await state()).computer.question, null)
   await finish(doing.id, {})
   assert.equal((await ticket(act.body.ticket)).ok, true)
 })
