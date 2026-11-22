@@ -15,7 +15,7 @@ export declare const CONTROL_ACTIONS_RANGE: readonly [number, number]
 export declare const CONTROL_MINUTES_RANGE: readonly [number, number]
 export declare const DEFAULT_TALK_KEY: 'Ctrl+Alt+Space'
 export declare const DEFAULT_LOOK_KEY: 'Ctrl+Alt+Q'
-export declare const DEFAULT_SUMMARIZE_KEY: 'Ctrl+Alt+S'
+export declare const DEFAULT_SUMMARIZE_KEY: 'Ctrl+Alt+P'
 export declare const DEFAULT_TERMINAL_KEY: 'Ctrl+Alt+T'
 export declare const CUSTOM_AVATAR: 'custom'
 export declare const SPRITE_SIZE_RANGE: readonly [number, number]

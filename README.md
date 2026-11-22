@@ -97,7 +97,7 @@ Your bots and settings stay in `%APPDATA%\ClaudeMiniBot`, and the optional speec
 | **Click** the bot, type, **Enter** | send a prompt to Claude Code |
 | **Hold Space** in the prompt | talk instead of typing |
 | The **snip** button | screenshot part of the screen and ask about it |
-| **Ctrl+Alt+S**, or **Summarize this page** under the prompt | have Claude read the page in front and sum it up |
+| **Ctrl+Alt+P**, or **Summarize this page** under the prompt | have Claude read the page in front and sum it up |
 | "make me a bot that looks like a fox", or `/mini-bot design a fox` | get a bot of your own, with a preview first |
 | **Ctrl+Alt+T**, or **Open Claude Code** under the prompt | work in the real Claude Code window of the bot's own session |
 | **Drop files** on the bot | have Claude look at them (see below) |
@@ -129,7 +129,7 @@ Taken from the app itself, not imitated:
 | The **sliders** button in the panel | customize this bot |
 | The **snip** button in the panel, or right-click > Take screenshot | snip part of the screen and ask Claude about it (below) |
 | **Drop** files or folders on the bot or its panel, or **Ctrl+V** files copied in Explorer | attach them to the next prompt as chips (below) |
-| **Summarize this page** under the prompt, right-click > Summarize this page, or **Ctrl+Alt+S** from any program | Claude reads the page in front and sums it up (below) |
+| **Summarize this page** under the prompt, right-click > Summarize this page, or **Ctrl+Alt+P** from any program | Claude reads the page in front and sums it up (below) |
 | **Open Claude Code** under the prompt, right-click > Open Claude Code, or **Ctrl+Alt+T** from any program | the real Claude Code window of the bot's own session, beside the bot (below) |
 | **Ctrl+Alt+B**, from any program | hide the bot or bring it back (below) |
 | The tray icon | show or hide the bot, open the prompt, summarize the page in front, take a screenshot, open Claude Code, customize, stop |
@@ -152,7 +152,7 @@ Typing `/name args` in the panel runs that command in your Claude Code session, 
 
 ### Summarize this page
 
-Press **Ctrl+Alt+S** in any program (or click **Summarize this page** under the prompt, or right-click the bot, or say "Hey Mini, summarize this page") and Claude tells you what the page in front of you says: what it is in a sentence or two, the main points, and anything you would need to do or decide. Ask follow-up questions after it; the page is already in the conversation.
+Press **Ctrl+Alt+P** in any program (or click **Summarize this page** under the prompt, or right-click the bot, or say "Hey Mini, summarize this page") and Claude tells you what the page in front of you says: what it is in a sentence or two, the main points, and anything you would need to do or decide. Ask follow-up questions after it; the page is already in the conversation.
 
 - **It reads the words, not a picture.** The bot reads the page through Windows' accessibility interface, the one screen readers use, so Claude gets the whole page (not only the part on the screen), with its title and address. It works in Chrome, Edge, Brave and other Chromium browsers, in Firefox, in Word, Notepad and most programs that show text. Because it reads what your own browser already shows, pages you are signed in to work too, and nothing is fetched again.
 - **Nothing is clicked, scrolled or typed.** Reading is all it does. Password fields are never read.
@@ -160,7 +160,7 @@ Press **Ctrl+Alt+S** in any program (or click **Summarize this page** under the 
 - **Your permission.** Pressing the key or clicking the link is you asking, so that is the yes for that one read; the first time, the bot asks whether it may read pages at all, and the access indicator shows while it reads. When it is Claude that asks (you typed "what does this page say?", or `/mini-bot summarize`), the bot shows which page and waits for your **Let Claude read it**, unless you gave full access. `read_page` is the tool Claude uses for that.
 - **What is never read.** The windows that are never controlled are never read either: terminals and code editors, password managers, security screens, and any app you blocked.
 - **When a page gives no words** (a game, a remote desktop, some PDF viewers), the bot sends a picture of the window instead and Claude says that it can only see the part on the screen.
-- `/mini-bot summarize the pricing` asks for a summary with something to look for. `/mini-bot set summarize-key ctrl+alt+p` changes the key, and `off` turns it off.
+- `/mini-bot summarize the pricing` asks for a summary with something to look for. `/mini-bot set summarize-key ctrl+alt+g` changes the key, and `off` turns it off.
 
 ### A bot of your own, from your words
 
@@ -287,7 +287,7 @@ Per bot: name, avatar (Clawd, blob, robot, cat, ghost, bunny, or the bot's own p
 | `/mini-bot hide` · `show` · `toggle` | hide or restore the character; Claude Code stays connected. The same as the **Ctrl+Alt+B** shortcut |
 | `/mini-bot start` · `stop` | start or stop only the companion (overlay and runtime); Claude Code itself is never stopped |
 | `/mini-bot status` | what is running, the active bot, what access is in use, which model and effort the session runs on, whether the bot is connected to this session |
-| `/mini-bot settings [list]` · `set <field> <value>` | change settings by menu or by typing, e.g. `set opacity 70`, `set skin ocean`, `set accent pink`, `set accent #3fa7d6`, `set summarize-key ctrl+alt+p` |
+| `/mini-bot settings [list]` · `set <field> <value>` | change settings by menu or by typing, e.g. `set opacity 70`, `set skin ocean`, `set accent pink`, `set accent #3fa7d6`, `set summarize-key ctrl+alt+g` |
 | `/mini-bot permissions [grant\|revoke <screen\|microphone\|computer\|all>]` | see, grant or revoke access |
 | `/mini-bot switch [name]` · `create [name]` | change to another bot, or make one |
 | `/mini-bot bot list \| use \| new \| rename \| customize \| delete` | the full set of bot commands |

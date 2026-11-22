@@ -321,8 +321,8 @@ test('Claude Code\'s side can ask for its own window to be brought up, and for n
 
 test('the new shortcuts are settings like the others, and the overlay says whether Windows gave them', async () => {
   const { config } = await state()
-  assert.deepEqual([config.hotkey.summarize, config.hotkey.terminal], ['Ctrl+Alt+S', 'Ctrl+Alt+T'])
-  const clash = await api('POST', '/v1/config/apply', { op: 'settings', patch: { hotkey: { terminal: 'ctrl+alt+s' } } })
+  assert.deepEqual([config.hotkey.summarize, config.hotkey.terminal], ['Ctrl+Alt+P', 'Ctrl+Alt+T'])
+  const clash = await api('POST', '/v1/config/apply', { op: 'settings', patch: { hotkey: { terminal: 'ctrl+alt+p' } } })
   assert.match(clash.body.error, /already the key that summarizes the page/)
   assert.equal((await api('POST', '/v1/config/apply', { op: 'settings', patch: { hotkey: { summarize: 'off', terminal: 'ctrl+alt+j' } } })).status, 200)
   await api('POST', '/v1/overlay/hotkey', { name: 'terminal', combo: 'Ctrl+Alt+J', ok: false })

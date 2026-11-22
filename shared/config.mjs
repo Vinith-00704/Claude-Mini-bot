@@ -43,7 +43,7 @@ export const CONTROL_MINUTES_RANGE = [1, 120]
 export const DEFAULT_TALK_KEY = 'Ctrl+Alt+Space'
 export const DEFAULT_LOOK_KEY = 'Ctrl+Alt+Q'
 // The key that has Claude summarize the page in front, and the key that opens the real Claude Code window of Mini's own session.
-export const DEFAULT_SUMMARIZE_KEY = 'Ctrl+Alt+S'
+export const DEFAULT_SUMMARIZE_KEY = 'Ctrl+Alt+P'
 export const DEFAULT_TERMINAL_KEY = 'Ctrl+Alt+T'
 // When a reply is said aloud: when the person spoke the prompt, always, or never.
 export const SPEAK_MODES = ['spoken', 'always', 'off']

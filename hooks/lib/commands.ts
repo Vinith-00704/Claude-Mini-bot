@@ -117,11 +117,15 @@ async function listSettings($: Engine): Promise<string> {
 }
 
 async function setField($: Engine, args: string[]): Promise<string> {
-  const field = findField(args[0] ?? '')
+  // A setting's name may be typed as it is said, in words: "summarize key" is summarize-key. The longest name that fits is taken.
+  let named = 0
+  for (let n = Math.min(args.length, 3); n >= 1 && named === 0; n--) if (findField(args.slice(0, n).join('-'))) named = n
+  const field = named ? findField(args.slice(0, named).join('-')) : undefined
   if (!field) return `No setting called "${args[0] ?? ''}". /mini-bot settings list shows them.`
-  if (args.length < 2) return `Give ${field.id} a value. /mini-bot settings list shows the choices.`
+  const value = args.slice(named).join(' ')
+  if (!value) return `Give ${field.id} a value${field.id.endsWith('-key') ? ', like ctrl+alt+g' : ''}. /mini-bot settings list shows the choices.`
   const config = await loadConfig($)
-  const applied = field.apply(config, config.activeProfileId, args.slice(1).join(' '))
+  const applied = field.apply(config, config.activeProfileId, value)
   if ('error' in applied) return applied.error
   await commit($, applied.config)
   return `${field.label} is now ${currentValue(field, applied.config)}.`

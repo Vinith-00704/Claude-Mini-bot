@@ -252,10 +252,13 @@ test('the settings take a colour of the person\'s own, the bot\'s own art, and t
   expect(await run('set accent teal')).toMatch(/or a colour written like #3fa7d6/)
   expect(await run('set avatar ghost')).toBe('Avatar is now ghost.')
   expect(await run('set avatar custom')).toBe('Avatar is now custom (its own pixel art).')
-  expect(await run('set summarize-key ctrl+alt+p')).toBe('Key that summarizes the page in front is now Ctrl+Alt+P.')
-  expect(await run('set terminal-key ctrl+alt+p')).toMatch(/already the key that summarizes/)
+  expect(await run('set summarize-key ctrl+alt+g')).toBe('Key that summarizes the page in front is now Ctrl+Alt+G.')
+  // Said the way it reads, in words: the same setting.
+  expect(await run('set summarize key ctrl+alt+y')).toBe('Key that summarizes the page in front is now Ctrl+Alt+Y.')
+  expect(await run('set summarize key')).toMatch(/^Give summarize-key a value/)
+  expect(await run('set terminal-key ctrl+alt+y')).toMatch(/already the key that summarizes/)
   expect(await run('set terminal-key off')).toBe("Key that opens Claude Code's own window is now off.")
-  expect(await run('set summarize-key reset')).toMatch(/Ctrl\+Alt\+S/)
+  expect(await run('set summarize-key reset')).toMatch(/Ctrl\+Alt\+P/)
   expect(await run('bot list')).toMatch(/\* Pip \(its own pixel art\)/)
 })
 
