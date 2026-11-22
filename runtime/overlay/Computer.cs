@@ -243,6 +243,8 @@ namespace MiniBot
                 foreach (var hwnd in TopWindows())
                 {
                     if (Pid(hwnd) == ownPid || Native.IsIconic(hwnd)) continue;
+                    // A strip or a floating widget (a side bar, an overlay) is not a page, however far in front it lies.
+                    if (IsOnlyAWidget(hwnd)) continue;
                     // The desktop itself, and windows that are never read: the page is whatever lies in front beside them.
                     string process = ProcessName(AppPid(hwnd));
                     if (never.Contains(process) || (process.Equals("explorer", StringComparison.OrdinalIgnoreCase) && Title(hwnd) == "Program Manager")) continue;
@@ -258,6 +260,14 @@ namespace MiniBot
                 d["process"] = ProcessName(AppPid(found));
             }
             return d;
+        }
+
+        /// <summary>A window that never takes the focus, or that is too small to hold a page: a docked side bar, a game overlay, a floating button.</summary>
+        static bool IsOnlyAWidget(IntPtr hwnd)
+        {
+            if ((Win.GetWindowLong(hwnd, Win.GWL_EXSTYLE) & Native.WS_EX_NOACTIVATE) != 0) return true;
+            var r = Bounds(hwnd);
+            return r.Width < 240 || r.Height < 160;
         }
 
         Dictionary<string, object> ReadPage(Dictionary<string, object> args)
