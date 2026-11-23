@@ -27,6 +27,9 @@ const UNTRUSTED_PAGE =
 /** The first runtime version that reads pages and shows a designed bot. */
 const MIN_PAGE_VERSION = 6
 
+/** What a subagent is told: these tools are for the conversation the person can see. */
+export const MAIN_ONLY = "The Mini Bot's tools are only for the main conversation, where the person can see what happens. Ask from there."
+
 export const TOOLS = [
   {
     name: 'computer_start',
@@ -361,7 +364,7 @@ let mayBeControlling = false
 
 /** Serves one of the tools. */
 export async function serveControl($: Engine, tool: ControlTool, input: Record<string, unknown>, signal: AbortSignal): Promise<ToolAnswer> {
-  if (typeof input.agentId === 'string') return { deny: 'The Mini Bot\'s tools are only for the main conversation, where the person can see what happens. Ask from there.' }
+  if (typeof input.agentId === 'string') return { deny: MAIN_ONLY }
   if (tool === 'get_bot') {
     const config = await loadConfig($)
     const named = typeof input.name === 'string' ? input.name.trim() : ''

@@ -2,10 +2,12 @@
 // visibility, permissions, the prompt queue and the overlay driver. Claude Code
 // itself is never touched from here.
 
+import { spawn } from 'node:child_process'
+import { createHmac, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { join, resolve, sep } from 'node:path'
+import { basename, isAbsolute, join, resolve, sep } from 'node:path'
 import { activeProfile, adoptBot, applyOp, configKey, designBot, keepWhatACopyCannotHold, normalizeConfig, sameChoices } from '../../shared/config.mjs'
 import { Activity, Voice } from './activity.mjs'
 import { check, newToken, sameToken } from './auth.mjs'
@@ -15,6 +17,7 @@ import { Commands } from './commands.mjs'
 import { Computer } from './computer.mjs'
 import { Keeper } from './keeper.mjs'
 import { Permissions } from './permissions.mjs'
+import { platformFor } from './platform.mjs'
 import { Prompts } from './prompts.mjs'
 import { Routines } from './routines.mjs'
 import { Session } from './session.mjs'
@@ -26,7 +29,9 @@ import { indicatorFor, isVisible } from './visibility.mjs'
 // 4: computer control.
 // 5: Mini's own session, several sessions at once, questions in the bot, routines, full access, listening.
 // 6: reading the page in front, bots designed from a description, Claude Code's own window, replies shown as they are written.
-export const VERSION = 6
+// 7: running on an Android phone, with the Mini app as the overlay.
+// 8: the notice that Mini Hub is waiting for the owner's answer.
+export const VERSION = 8
 const MAX_BODY = 64 * 1024
 // The list of slash commands is a long request: a session with many skills makes it so.
 // So is the overlay's report of a look or a step, which carries a picture of the screen, and
@@ -55,6 +60,52 @@ export const OFF_FLAG = 'turned-off'
 
 const fail = (status, error) => Object.assign(new Error(error), { status })
 
+// The notice that Mini Hub waits for the owner: a card with no Yes or No, as long as the hub tool waits.
+const NOTICE_WAIT_MS = 130 * 1000
+const NOTICE_ID = /^[0-9a-f]{8}$/
+
+/** The installed Mini Hub's window program, or null: the one hub.json names, else the installer's usual place. */
+const findHubShell = (env = process.env) => {
+  const isFile = path => {
+    try {
+      return statSync(path).isFile()
+    } catch {
+      return false
+    }
+  }
+  const home = env.MINI_HUB_HOME || (env.APPDATA ? join(env.APPDATA, 'MiniHub') : null)
+  if (home) {
+    try {
+      const { shell } = JSON.parse(readFileSync(join(home, 'hub.json'), 'utf8'))
+      if (typeof shell === 'string' && isAbsolute(shell) && basename(shell).toLowerCase() === 'mini-hub.exe' && isFile(shell)) return shell
+    } catch {}
+  }
+  if (env.LOCALAPPDATA) {
+    const installed = join(env.LOCALAPPDATA, 'Mini Hub', 'mini-hub.exe')
+    if (isFile(installed)) return installed
+  }
+  return null
+}
+
+/** Starts Mini Hub's window (its own single-instance guard brings a running one forward). Its path is never logged. */
+const openHubShell = exe => {
+  const failed = () => console.error('Mini Hub could not be started.')
+  try {
+    const child = spawn(exe, [], { detached: true, stdio: 'ignore' })
+    child.on('error', failed)
+    child.unref()
+  } catch {
+    failed()
+  }
+}
+
+// On the phone, what only the PC has: the mouse and keyboard, the screen, the page in front, the companion's own
+// permission questions, starting with the PC, what the Windows overlay is asked to do, and Mini Hub's notice.
+const PC_ONLY_PREFIXES = ['/v1/computer/', '/v1/screen/', '/v1/page/', '/v1/permissions/']
+const PC_ONLY_ROUTES = new Set(['POST /v1/trust/ask', 'POST /v1/trust/mic', 'POST /v1/autostart', 'POST /v1/overlay/request', 'POST /v1/notice', 'POST /v1/notice/clear'])
+const isPcOnly = (method, path) => PC_ONLY_ROUTES.has(`${method} ${path}`) || PC_ONLY_PREFIXES.some(prefix => path.startsWith(prefix))
+const NONCE = /^[0-9a-f]{32,128}$/
+
 const readJson = async (req, limit = MAX_BODY) => {
   let size = 0
   const chunks = []
@@ -77,11 +128,12 @@ const writeAtomic = async (file, text) => {
   await rename(temp, file)
 }
 
-export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.now, autostart = createAutostart({ dataDir }), keeperOptions = {}, startedByPc = false }) => {
+export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.now, autostart = createAutostart({ dataDir }), keeperOptions = {}, startedByPc = false, platform = platformFor(), overlayKey: givenOverlayKey, phone }) => {
   const token = newToken()
   // A second secret, handed only to the overlay process and never written to disk: the person's answers in the
   // bot (allow, skip, stop, take over) need it, so nothing that can read runtime.json can answer for them.
-  const overlayKey = newToken()
+  // On the phone the Mini app makes it and hands it over on standard input.
+  const overlayKey = givenOverlayKey ?? newToken()
   const permissions = new Permissions({ now })
   const trust = new Trust({ file: join(dataDir, 'trust.json') })
   const cards = new Cards({ now })
@@ -143,6 +195,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     onClosed: () => prompts.forgetMain(),
     botName: () => activeProfile(config).name,
     now,
+    ...platform.keeper,
     ...keeperOptions,
   })
   let server = null
@@ -169,7 +222,10 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     void persist()
     // The person asked for Mini's own session, or no longer wants it; a new model or mode takes effect at a restart.
     const now_ = config.assistant
-    if (now_.session !== was.session) {
+    // On the phone the session is always wanted while the runtime runs, and its limits are the app's: only a new model counts.
+    if (platform.phone) {
+      if (now_.model !== was.model) void keeper.restart()
+    } else if (now_.session !== was.session) {
       if (now_.session) void keeper.retry()
       else void keeper.stop()
     } else if (now_.session && (now_.model !== was.model || now_.permissions !== was.permissions)) void keeper.restart()
@@ -292,6 +348,7 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
 
   const state = () => ({
     running: true,
+    ...(platform.phone ? { platform: 'android' } : {}),
     version: VERSION,
     pid: process.pid,
     startedAt,
@@ -459,6 +516,30 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
     'POST /v1/cards/ask': body => ({ ticket: cards.askTicket({ kind: body.kind, text: body.text, options: body.options, waitMs: Number.isFinite(body.waitMs) ? body.waitMs : undefined }) }),
     'GET /v1/cards/ticket': (_body, ctx) => cards.wait(ctx.query.get('id'), Number(ctx.query.get('wait') ?? 0)),
     'POST /v1/cards/answer': (body, ctx) => (fromOverlay(ctx), cards.answer(body), state()),
+    // Mini Hub waits for the owner's answer: the bot points them there. The answer itself is given only in Mini Hub, so
+    // this card never carries Yes or No; Open Mini Hub starts its window, Later only takes the card down.
+    'POST /v1/notice': body => {
+      if (typeof body.text !== 'string' || body.text.length < 1 || body.text.length > 200) throw fail(400, 'text is 1 to 200 characters')
+      if (body.action !== 'open-hub') throw fail(400, 'action is open-hub')
+      const id = randomBytes(4).toString('hex')
+      const found = findHubShell() !== null
+      void cards.ask({
+        kind: `hub-${id}`,
+        text: found ? body.text : `${body.text} Open it from the tray.`,
+        options: found ? [{ id: 'open', label: 'Open Mini Hub', primary: true }, { id: 'later', label: 'Later' }] : [{ id: 'ok', label: 'OK', primary: true }, { id: 'later', label: 'Later' }],
+        waitMs: NOTICE_WAIT_MS,
+      }).then(choice => {
+        if (choice !== 'open') return
+        const exe = findHubShell()
+        if (exe) openHubShell(exe)
+      })
+      return { id }
+    },
+    'POST /v1/notice/clear': body => {
+      if (typeof body.id !== 'string' || !NOTICE_ID.test(body.id)) throw fail(400, 'id is 8 hex characters')
+      cards.dismiss(`hub-${body.id}`)
+      return { ok: true }
+    },
     // Turning on what stays on (listening, full access) goes through a question in the bot; turning it off goes through nothing.
     'POST /v1/trust/ask': body => (askTrust(body.what), state()),
     'POST /v1/trust/off': body => (dropTrust(body.what), state()),
@@ -495,6 +576,17 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
       return { ticket }
     },
     'POST /v1/routines/remove': body => ({ removed: routines.remove(body.which) }),
+    // On the phone: where the Mini app's hands are (for the phone tools), and the runtime's proof that it holds the overlay key.
+    ...(platform.phone
+      ? {
+          'GET /v1/phone/hands': () => ({ url: phone.handsUrl, token: phone.handsToken }),
+          'GET /v1/phone/proof': (_body, ctx) => {
+            const nonce = ctx.query.get('nonce') ?? ''
+            if (!NONCE.test(nonce)) throw fail(400, 'nonce is hex')
+            return { proof: createHmac('sha256', overlayKey).update(nonce).digest('hex') }
+          },
+        }
+      : {}),
     'POST /v1/shutdown': body => {
       // Turned off by the person: a new Claude Code session leaves it off until they turn it on.
       if (body.off === true) void writeFile(join(dataDir, OFF_FLAG), String(now())).catch(() => {})
@@ -532,11 +624,16 @@ export const createRuntime = ({ dataDir, overlay, onExit = () => {}, now = Date.
       res.end(JSON.stringify(payload))
     }
     try {
-      const refused = check(req, { token, port })
+      // On the phone, the app asks for the runtime's proof before it sends any secret (a program that took this port
+      // after the runtime died must learn nothing from the app): that one route needs no token, only the right Host.
+      const proofOnly = platform.phone && (req.method ?? 'GET') === 'GET' && (req.url ?? '/').split('?')[0] === '/v1/phone/proof'
+      const refused = check(req, { token, port, tokenless: proofOnly })
       if (refused) return send(refused.status, { error: refused.error })
       const where = new URL(req.url ?? '/', url())
       const path = where.pathname
       const method = req.method ?? 'GET'
+      if (overlay.seen && sameToken(String(req.headers['x-mini-bot-overlay'] ?? ''), overlayKey)) overlay.seen()
+      if (platform.phone && isPcOnly(method, path)) return send(409, { error: 'That is not available on the phone.' })
       const route = routes[`${method} ${path}`]
       const body = method === 'GET' ? {} : await readJson(req, MAX_BODY_BY_ROUTE[`${method} ${path}`])
       const ctx = { query: where.searchParams, overlayKey: String(req.headers['x-mini-bot-overlay'] ?? '') }

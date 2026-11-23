@@ -12,6 +12,8 @@ import { commit, startRuntime, stopRuntime } from './lifecycle'
 import { mainMenu } from './menu'
 import { describeAccess, grantAccess, parseKind, revokeAccess, revokeAll } from './permissions'
 import { permissionsMenu } from './permissions-menu'
+import { notOnPhone } from './phone'
+import { platformOf } from './platform'
 import { activeProfile, createProfile, deleteProfile, findProfile, renameProfile, selectProfile, type Result } from './profiles'
 import { confirm, pick } from './prompts'
 import { currentValue, findField, FIELDS, GROUPS } from './fields'
@@ -211,6 +213,11 @@ async function switchBot($: Engine, args: string[]): Promise<string> {
 
 export async function runCommand($: Engine, input: string): Promise<string> {
   const [verb = '', ...args] = tokenize(input)
+  // On the phone, what has no use there says so in one line; everything else works as on the PC.
+  if ((await platformOf($)) === 'android') {
+    const refused = notOnPhone(verb)
+    if (refused !== null) return refused
+  }
   const text = await (async () => {
     switch (verb.toLowerCase()) {
       case '':

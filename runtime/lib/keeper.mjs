@@ -122,6 +122,13 @@ export class Keeper {
   #stopProcess
   #isProcess
   #env
+  #wantedFn
+  #homeDir
+  #argsFn
+  #instructions
+  #launchFailed
+  #needsYouNote
+  #keepsClosingNote
   #status = 'off'
   #note = ''
   #pid = null
@@ -136,9 +143,11 @@ export class Keeper {
 
   /**
    * `isConnected()` says whether Mini's session is picking up prompts right now. `launch`, `stopProcess` and `isProcess`
-   * stand in for the real process in tests.
+   * stand in for the real process in tests. `wanted`, `home`, `args`, `instructions`, `launchFailed`, `needsYouNote` and
+   * `keepsClosingNote` are what a platform other than the PC does differently (the phone, `platform.mjs`); left out,
+   * the PC's are used.
    */
-  constructor({ dataDir, config, trust, isConnected, onClosed = () => {}, botName = () => 'Mini', now = Date.now, timers = { set: setTimeout, clear: clearTimeout }, launch = launchHidden, stopProcess, isProcess, env = process.env }) {
+  constructor({ dataDir, config, trust, isConnected, onClosed = () => {}, botName = () => 'Mini', now = Date.now, timers = { set: setTimeout, clear: clearTimeout }, launch = launchHidden, stopProcess, isProcess, env = process.env, wanted, home, args, instructions: writeInstructions = instructions, launchFailed = 'Claude Code could not be started. Is "claude" on your PATH? Try running it in a terminal once.', needsYouNote = 'Claude Code is waiting for something in its window, or has not finished starting.', keepsClosingNote = `Claude Code's session keeps closing, so it was left off after ${MAX_RESTARTS} tries. /mini-bot assistant on tries again.` }) {
     this.#dataDir = dataDir
     this.#config = config
     this.#trust = trust
@@ -149,6 +158,13 @@ export class Keeper {
     this.#timers = timers
     this.#launch = launch
     this.#env = env
+    this.#wantedFn = wanted
+    this.#homeDir = home
+    this.#argsFn = args
+    this.#instructions = writeInstructions
+    this.#launchFailed = launchFailed
+    this.#needsYouNote = needsYouNote
+    this.#keepsClosingNote = keepsClosingNote
     this.#stopProcess = stopProcess ?? (pid => run('taskkill', ['/PID', String(pid), '/T', '/F']))
     this.#isProcess = isProcess ?? (async pid => {
       if (!isAlive(pid)) return false
@@ -163,7 +179,7 @@ export class Keeper {
   }
 
   get home() {
-    return join(this.#dataDir, 'home')
+    return this.#homeDir ?? join(this.#dataDir, 'home')
   }
 
   get #startedFile() {
@@ -172,6 +188,7 @@ export class Keeper {
 
   /** Whether the person wants the session. */
   get isWanted() {
+    if (this.#wantedFn) return this.#wantedFn() === true
     return this.#config().assistant.session === true
   }
 
@@ -183,10 +200,11 @@ export class Keeper {
   async #prepareHome() {
     await mkdir(this.home, { recursive: true })
     const file = join(this.home, 'CLAUDE.md')
-    if (!existsSync(file)) await writeFile(file, instructions(this.#botName()))
+    if (!existsSync(file)) await writeFile(file, this.#instructions(this.#botName()))
   }
 
   #args(resumeId) {
+    if (this.#argsFn) return this.#argsFn(this.#config(), resumeId)
     const { model, permissions } = this.#config().assistant
     const args = ['-n', SESSION_NAME, '--permission-mode', permissions]
     if (model) args.push('--model', model)
@@ -272,7 +290,7 @@ export class Keeper {
     const patience = existsSync(this.#startedFile) ? NEEDS_YOU_MS : FIRST_START_MS
     if (this.#status === 'starting' && this.#now() - this.#startedAt > patience) {
       this.#status = 'needs-you'
-      this.#note = 'Claude Code is waiting for something in its window, or has not finished starting.'
+      this.#note = this.#needsYouNote
     }
   }
 
@@ -281,7 +299,7 @@ export class Keeper {
     this.#restarts = this.#restarts.filter(at => now - at < RESTART_WINDOW_MS)
     if (this.#restarts.length >= MAX_RESTARTS) {
       this.#status = 'failed'
-      this.#note = `Claude Code's session keeps closing, so it was left off after ${MAX_RESTARTS} tries. /mini-bot assistant on tries again.`
+      this.#note = this.#keepsClosingNote
       return
     }
     this.#restarts.push(now)
@@ -304,7 +322,7 @@ export class Keeper {
       const launched = await this.#launch({ cwd: this.home, args: this.#args(this.#sessionId), env: sessionEnv(this.#env) })
       if (!launched.ok) {
         this.#status = 'failed'
-        this.#note = 'Claude Code could not be started. Is "claude" on your PATH? Try running it in a terminal once.'
+        this.#note = launched.note ?? this.#launchFailed
         return
       }
       this.#pid = launched.pid

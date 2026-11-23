@@ -44,4 +44,27 @@ export const windowsOverlay = () => {
   }
 }
 
-export const defaultOverlay = () => (process.platform === 'win32' ? windowsOverlay() : noOverlay())
+// How long after its last request the phone app still counts as the bot on the screen. The app asks every 30 s while
+// the bot is shown, so one late answer does not take the bot off the screen.
+const EXTERNAL_ATTACHED_MS = 75 * 1000
+
+/**
+ * The phone's driver: it starts nothing. The Mini app is the overlay, and it is on the screen while its requests
+ * carrying the overlay key keep coming (`seen`, called by the runtime for each one).
+ */
+export const externalOverlay = ({ now = Date.now } = {}) => {
+  let lastSeen = null
+  return {
+    name: 'external',
+    start() {},
+    stop() {},
+    seen() {
+      lastSeen = now()
+    },
+    get isAttached() {
+      return lastSeen !== null && now() - lastSeen < EXTERNAL_ATTACHED_MS
+    },
+  }
+}
+
+export const defaultOverlay =() => (process.platform === 'win32' ? windowsOverlay() : noOverlay())

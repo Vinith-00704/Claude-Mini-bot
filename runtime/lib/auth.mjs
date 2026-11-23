@@ -15,8 +15,11 @@ export const sameToken = (given, expected) => {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-/** Returns null when the request may proceed, else `{ status, error }`. */
-export const check = (req, { token, port }) => {
+/**
+ * Returns null when the request may proceed, else `{ status, error }`. `tokenless` skips the token only (Host and Origin
+ * are still checked): for the phone's proof, which the app asks before it sends any secret.
+ */
+export const check = (req, { token, port, tokenless = false }) => {
   if (req.headers.origin !== undefined) {
     return { status: 403, error: 'browser requests are refused' }
   }
@@ -24,6 +27,7 @@ export const check = (req, { token, port }) => {
   if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) {
     return { status: 403, error: 'unexpected host' }
   }
+  if (tokenless) return null
   const header = req.headers.authorization ?? ''
   const given = header.startsWith('Bearer ') ? header.slice(7) : ''
   if (!sameToken(given, token)) {
